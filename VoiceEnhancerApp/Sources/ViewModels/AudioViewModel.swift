@@ -105,6 +105,7 @@ final class AudioViewModel: ObservableObject {
     private let preview = VoicePreview()
     private var meterTimer: Timer?
     private var deviceMonitor: AudioDeviceMonitor?
+    private var wakeMonitor: CaptureWakeMonitor?
     private lazy var recovery = CaptureRecoveryCoordinator(
         start: { [weak self] in
             guard let self else { throw CancellationError() }
@@ -133,6 +134,9 @@ final class AudioViewModel: ObservableObject {
             guard let self else { return }
             self.refreshDeviceList()
             self.recovery.requestRestart()
+        }
+        self.wakeMonitor = CaptureWakeMonitor { [weak self] in
+            self?.recovery.requestRestart(delay: 3_000_000_000)
         }
 
         // Wire preview: tap raw audio from capture, publish state changes.

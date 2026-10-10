@@ -1,5 +1,6 @@
 import CaptureLifecycle
 import Foundation
+import AppKit
 
 @MainActor
 final class TestClock {
@@ -151,6 +152,33 @@ struct CaptureRecoveryTests {
         await manualRetry.retry()
         expect(manualRetry.state == .running && manualRetry.wantsCapture, "explicit retry can start capture from idle")
         manualRetry.stop()
+        let wakeCapture = FakeCapture(), wakeClock = TestClock()
+        let waking = make(wakeCapture, wakeClock)
+        let center = NotificationCenter()
+        var wakes = 0
+        var monitor: CaptureWakeMonitor? = CaptureWakeMonitor(center: center) {
+            wakes += 1
+            waking.requestRestart(delay: 3_000_000_000)
+        }
+        weak var weakMonitor = monitor
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await eventually { wakes == 1 }
+        expect(wakeClock.pending.isEmpty && wakeCapture.starts == 0, "wake preserves intentional stop")
+        await waking.start()
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await eventually { wakeClock.pending.count == 1 }
+        expect(wakeClock.delays.last == 3_000_000_000, "wake waits for device stabilization")
+        waking.requestRestart(delay: 250_000_000)
+        await eventually { wakeClock.pending.count == 2 }
+        wakeClock.advance()
+        await eventually { waking.state == .running }
+        expect(wakeCapture.starts == 2, "wake and device events coalesce into one recovery")
+        monitor = nil
+        expect(weakMonitor == nil, "wake observer owner is released")
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        for _ in 0..<20 { await Task.yield() }
+        expect(wakes == 2, "released wake monitor removes observer")
+        waking.stop()
         print("Capture recovery: \(checks) checks, \(failures) failures")
         if failures != 0 { exit(1) }
     }
