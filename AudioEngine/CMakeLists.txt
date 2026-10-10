@@ -51,7 +51,8 @@ set_target_properties(voice_enhancer PROPERTIES
 option(VOICE_ENHANCER_BUILD_TESTS "Build unit tests" ON)
 if(VOICE_ENHANCER_BUILD_TESTS)
     add_executable(voice_enhancer_tests tests/test_engine.cpp)
-    target_link_libraries(voice_enhancer_tests PRIVATE voice_enhancer)
+    find_package(Threads REQUIRED)
+    target_link_libraries(voice_enhancer_tests PRIVATE voice_enhancer Threads::Threads)
 
     enable_testing()
     add_test(NAME engine_tests COMMAND voice_enhancer_tests)

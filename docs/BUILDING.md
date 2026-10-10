@@ -204,3 +204,20 @@ restart, and a stopped app ignores wake. Observer teardown removes registration.
 and checks delay, event coalescing, stopped intent and observer lifetime. A real
 Mac sleep/wake test remains manual; automated tests do not put the Mac to sleep.
 Adapted from wondervip PR #4's delayed wake reconnect behavior.
+
+## DSP control updates
+
+Existing gain/threshold setters publish lock-free scalar updates; only the audio
+owner changes DSP stage state. Updates are consumed before each block. Factory
+recall resets threshold overrides, including recalling the same factory; later
+threshold edits override that recall. Prepare/reconnect restores pending working
+values after factory setup. Controls have one UI producer; complete grouped
+snapshot transactions remain a later API. No C ABI identifiers were changed.
+
+Engine tests cover restoration, same-factory recall and 10,000 concurrent
+control sequences followed by final-value waveform comparison. Local Release
+benchmark on this Apple Silicon Mac: 128-frame blocks 5.71 us (baseline 6.11),
+512-frame blocks 20.49 us (baseline 20.72), about 0.2% of real time. This single
+microbenchmark includes buffer copying and does not establish a speedup or
+whole-app CPU use. Xcode now runs the incremental native build on each build,
+preventing a stale static library after DSP edits.
