@@ -24,9 +24,8 @@ import VoiceEnhancerTapSupport
 ///     apps treat microphones anyway.
 ///   * Buffer size is 512 frames at 48 kHz (~10.7 ms). Good balance of
 ///     latency vs. CPU efficiency.
-///   * Connect the input in its native format to a mixer that converts to
-///     48 kHz float32. Tap the mixer and copy its first channel to the mono
-///     DSP buffer. A tap on the input node cannot request a different format.
+///   * Tap the input at its native rate and channel count. A streaming
+///     converter supplies 48 kHz mono without opening a hardware output.
 final class MicCapture {
     /// AVAudioEngine can hand us much larger blocks than the requested tap
     /// buffer size during route changes and on some built-in devices. Keep
@@ -37,7 +36,6 @@ final class MicCapture {
     private let engineBridge: AudioEngineBridge
     private let ringBridge: RingBufferBridge
     private var avEngine = AVAudioEngine()
-    private var captureMixer = AVAudioMixerNode()
     var engineConfigurationChangeHandler: (() -> Void)?
 
     /// Optional tap that receives raw pre-DSP audio (48 kHz mono float32).
@@ -46,8 +44,7 @@ final class MicCapture {
     var rawAudioTap: ((UnsafePointer<Float>, Int) -> Void)?
 
     /// The target format the ring expects. Fixed: 48 kHz, mono, float32.
-    /// The mixer handles rate conversion. Channel 0 is copied to this mono
-    /// contract after conversion, preserving the first-channel policy.
+    /// Channel 0 is converted to this contract, preserving the first-channel policy.
     private let ringFormat: AVAudioFormat = {
         AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -57,16 +54,10 @@ final class MicCapture {
         )!
     }()
 
-    /// Scratch buffer holding mono 48 kHz samples for DSP processing.
-    /// Sized generously — some macOS input paths hand us ~4800-frame blocks
-    /// even when the tap requests 512, and route changes can briefly grow that.
-    private var processingBuffer = [Float](repeating: 0, count: MicCapture.maxProcessingFrames)
-
     // An installation can throw after mutating the node, so cleanup must
     // attempt removal even when installation did not return successfully.
     private var tapMayBeInstalled = false
     private var engineConfigurationObserver: NSObjectProtocol?
-    private var hasLoggedFirstInputBuffer = false
 
     init(engineBridge: AudioEngineBridge, ringBridge: RingBufferBridge) {
         self.engineBridge = engineBridge
@@ -120,9 +111,6 @@ final class MicCapture {
         ringBridge.bumpGeneration()
 
         let input = avEngine.inputNode
-        let block: AVAudioNodeTapBlock = { [weak self] buffer, _ in
-            self?.handleInputBuffer(buffer)
-        }
         do {
             // The input scope describes the hardware rate/channel count.
             let nativeFormat = input.inputFormat(forBus: 0)
@@ -130,17 +118,25 @@ final class MicCapture {
                   nativeFormat.channelCount > 0,
                   let captureFormat = AVAudioFormat(
                     commonFormat: .pcmFormatFloat32,
-                    sampleRate: ringFormat.sampleRate,
+                    sampleRate: nativeFormat.sampleRate,
                     channels: nativeFormat.channelCount,
                     interleaved: false
                   ) else {
                 throw MicCaptureError.inputConfigurationFailed("The microphone has no valid input format.")
             }
-            if let error = VEConfigureCaptureGraphSafely(avEngine, input, captureMixer, nativeFormat, captureFormat) {
-                throw MicCaptureError.inputConfigurationFailed(error.localizedDescription)
+            let conversion = try CaptureConversion(sampleRate: nativeFormat.sampleRate)
+            let block: AVAudioNodeTapBlock = { [weak self, conversion] buffer, _ in
+                guard let self, let channels = buffer.floatChannelData else { return }
+                // Conversion owns bounded scratch buffers and retains its state
+                // for this tap's lifetime, including callbacks during teardown.
+                VEPCMConverterProcess(conversion.handle, channels[0], buffer.frameLength, { context, samples, frames in
+                    guard let context, let samples else { return }
+                    let capture = Unmanaged<MicCapture>.fromOpaque(context).takeUnretainedValue()
+                    capture.handleConvertedSamples(samples, count: Int(frames))
+                }, Unmanaged.passUnretained(self).toOpaque())
             }
             tapMayBeInstalled = true
-            if let error = VEInstallInputTapSafely(captureMixer, 0, 512, captureFormat, block) {
+            if let error = VEInstallInputTapSafely(input, 0, 512, captureFormat, block) {
                 throw MicCaptureError.tapInstallationFailed(error.localizedDescription)
             }
             try avEngine.start()
@@ -161,14 +157,13 @@ final class MicCapture {
     private func stopCaptureGraph(discardGraph: Bool = false) {
         var removalFailed = false
         if tapMayBeInstalled {
-            if let error = VERemoveInputTapSafely(captureMixer, 0) {
+            if let error = VERemoveInputTapSafely(avEngine.inputNode, 0) {
                 logger.warning("Audio tap removal failed: \(error.localizedDescription, privacy: .public)")
                 removalFailed = true
             }
             tapMayBeInstalled = false
         }
         avEngine.stop()
-        hasLoggedFirstInputBuffer = false
         if removalFailed || discardGraph {
             discardCaptureGraph()
         }
@@ -179,7 +174,6 @@ final class MicCapture {
             NotificationCenter.default.removeObserver(engineConfigurationObserver)
         }
         avEngine = AVAudioEngine()
-        captureMixer = AVAudioMixerNode()
         observeEngineConfiguration()
     }
 
@@ -191,28 +185,10 @@ final class MicCapture {
     /// no Swift concurrency. Anything non-trivial happens inside the C++
     /// engine or the lock-free ring. The buffer handling here is deliberately
     /// minimal.
-    private func handleInputBuffer(_ buffer: AVAudioPCMBuffer) {
-        let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0, frameCount <= processingBuffer.count else { return }
-        guard let channelData = buffer.floatChannelData else { return }
-
-        if !hasLoggedFirstInputBuffer {
-            hasLoggedFirstInputBuffer = true
-            DispatchQueue.main.async { [weak self, frameCount] in
-                self?.logger.notice("First converted input buffer: \(frameCount, privacy: .public) frames @ 48 kHz")
-            }
-        }
-
-        // Copy channel 0 into the processing scratch buffer.
-        // The conversion mixer supplies 48 kHz float32 and preserves the
-        // input channels. Take only channel 0; conversion has already run.
-        processingBuffer.withUnsafeMutableBufferPointer { dst in
-            guard let base = dst.baseAddress else { return }
-            base.update(from: channelData[0], count: frameCount)
-            rawAudioTap?(UnsafePointer(base), frameCount)
-            engineBridge.process(buffer: base, numFrames: Int32(frameCount))
-            ringBridge.write(base, numFrames: Int32(frameCount))
-        }
+    private func handleConvertedSamples(_ samples: UnsafeMutablePointer<Float>, count: Int) {
+        rawAudioTap?(UnsafePointer(samples), count)
+        engineBridge.process(buffer: samples, numFrames: Int32(count))
+        ringBridge.write(samples, numFrames: Int32(count))
     }
 
     private func handleEngineConfigurationChange() {
@@ -292,4 +268,19 @@ enum MicCaptureError: LocalizedError {
             return "Could not configure microphone capture: \(message)"
         }
     }
+}
+
+/// Owned by the tap block so an in-flight callback never sees a freed converter.
+private final class CaptureConversion {
+    let handle: OpaquePointer
+
+    init(sampleRate: Double) throws {
+        var status: OSStatus = noErr
+        guard let handle = VEPCMConverterCreate(sampleRate, &status) else {
+            throw MicCaptureError.inputConfigurationFailed("Could not convert microphone audio to 48 kHz (code \(status)).")
+        }
+        self.handle = handle
+    }
+
+    deinit { VEPCMConverterDestroy(handle) }
 }
