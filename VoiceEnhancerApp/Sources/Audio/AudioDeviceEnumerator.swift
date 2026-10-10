@@ -9,7 +9,9 @@ import CoreAudio
 ///
 /// Why not use `AVAudioSession`? That's iOS. On macOS we go straight to HAL.
 enum AudioDeviceEnumerator {
-    private static let virtualDriverName = "Voice Enhancer"
+    // Keep synchronized with VirtualDriver/src/Common.h. Display names can
+    // change and can also belong to an unrelated physical microphone.
+    static let virtualDeviceUID = "tech.aheadly.voice-enhancer.device"
 
     /// Return every device on the system that can provide input.
     ///
@@ -17,6 +19,14 @@ enum AudioDeviceEnumerator {
     /// we do no shared state. Runs in a few hundred microseconds — fine to
     /// call from the main thread during UI refresh.
     static func listInputDevices() -> [AudioDevice] {
+        selectableInputs(from: allInputDevices())
+    }
+
+    static func selectableInputs(from devices: [AudioDevice]) -> [AudioDevice] {
+        devices.filter { $0.hasInput && $0.uid != virtualDeviceUID }
+    }
+
+    private static func allInputDevices() -> [AudioDevice] {
         let deviceIDs = allDeviceIDs()
         return deviceIDs.compactMap { id -> AudioDevice? in
             // Skip devices that have zero input channels. We only want mics.
@@ -36,8 +46,36 @@ enum AudioDeviceEnumerator {
         listInputDevices().first { $0.uid == uid }?.deviceID
     }
 
-    /// The current system-default input device, if one is set.
+    /// Resolve explicitly before binding capture. Passing nil to AVAudioEngine
+    /// would let it choose the virtual mic when that is the system default.
+    static func captureInput(preferredUID: String?) throws -> AudioDevice {
+        try captureInput(preferredUID: preferredUID, devices: allInputDevices(),
+                         defaultDeviceID: systemDefaultInputID())
+    }
+
+    // The same policy is exercised with device-list fixtures in regression tests.
+    static func captureInput(preferredUID: String?, devices: [AudioDevice],
+                             defaultDeviceID: AudioDeviceID?) throws -> AudioDevice {
+        if preferredUID == virtualDeviceUID { throw InputSelectionError.virtualMicrophoneSelected }
+        let inputs = selectableInputs(from: devices)
+        if let preferredUID, let device = inputs.first(where: { $0.uid == preferredUID }) {
+            return device
+        }
+        if let defaultDeviceID,
+           let device = devices.first(where: { $0.deviceID == defaultDeviceID && $0.hasInput }) {
+            guard device.uid != virtualDeviceUID else { throw InputSelectionError.virtualMicrophoneDefault }
+            return device
+        }
+        throw InputSelectionError.noInputDevice
+    }
+
+    /// The current system-default selectable input, if one is set.
     static func defaultInputDevice() -> AudioDevice? {
+        guard let id = systemDefaultInputID() else { return nil }
+        return listInputDevices().first { $0.deviceID == id }
+    }
+
+    private static func systemDefaultInputID() -> AudioDeviceID? {
         var id: AudioDeviceID = 0
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var addr = AudioObjectPropertyAddress(
@@ -49,15 +87,16 @@ enum AudioDeviceEnumerator {
             AudioObjectID(kAudioObjectSystemObject),
             &addr, 0, nil, &size, &id
         )
-        guard status == noErr, id != 0 else { return nil }
-        return listInputDevices().first { $0.deviceID == id }
+        return status == noErr && id != 0 ? id : nil
     }
 
-    /// Whether the virtual Voice Enhancer input device is currently visible
-    /// to the HAL. This is a better user-facing "driver installed" signal
-    /// than shared-memory availability.
+    /// Driver detection uses the unfiltered inventory and stable identity.
     static func hasVoiceEnhancerDriver() -> Bool {
-        listInputDevices().contains { $0.name == virtualDriverName }
+        containsVoiceEnhancerDriver(in: allInputDevices())
+    }
+
+    static func containsVoiceEnhancerDriver(in devices: [AudioDevice]) -> Bool {
+        devices.contains { $0.uid == virtualDeviceUID && $0.hasInput }
     }
 
     // MARK: - Private helpers
@@ -125,5 +164,22 @@ enum AudioDeviceEnumerator {
         }
         guard status == noErr else { return nil }
         return cf as String
+    }
+}
+
+enum InputSelectionError: LocalizedError, Equatable {
+    case virtualMicrophoneSelected
+    case virtualMicrophoneDefault
+    case noInputDevice
+
+    var errorDescription: String? {
+        switch self {
+        case .virtualMicrophoneSelected:
+            return "Voice Enhancer cannot capture its own virtual microphone. Choose another microphone in Settings."
+        case .virtualMicrophoneDefault:
+            return "The system default input is Voice Enhancer. Choose another microphone in Settings."
+        case .noInputDevice:
+            return "No input microphone is available. Connect a microphone and choose it in Settings."
+        }
     }
 }
