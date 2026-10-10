@@ -20,6 +20,9 @@ let package = Package(
         .executable(name: "VoiceEnhancer", targets: ["VoiceEnhancer"])
     ],
     targets: [
+        .target(name: "CaptureLifecycle", path: "Sources/Audio/Lifecycle"),
+        .executableTarget(name: "CaptureLifecycleTests", dependencies: ["CaptureLifecycle"],
+                          path: "Tests/CaptureLifecycleTests"),
         .target(
             name: "VoiceEnhancerTapSupport",
             path: "Sources/Audio/TapSupport",
@@ -29,9 +32,9 @@ let package = Package(
         ),
         .executableTarget(
             name: "VoiceEnhancer",
-            dependencies: ["VoiceEnhancerTapSupport"],
+            dependencies: ["VoiceEnhancerTapSupport", "CaptureLifecycle"],
             path: "Sources",
-            exclude: ["Resources/Info.plist", "Audio/TapSupport"],
+            exclude: ["Resources/Info.plist", "Audio/TapSupport", "Audio/Lifecycle"],
             resources: [
                 .process("Resources/Assets.xcassets")
             ]

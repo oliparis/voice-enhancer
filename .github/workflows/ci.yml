@@ -99,6 +99,10 @@ jobs:
         working-directory: VoiceEnhancerApp
         run: swift run -c release TapSupportTests
 
+      - name: Run capture lifecycle regression checks
+        working-directory: VoiceEnhancerApp
+        run: swift run -c release CaptureLifecycleTests
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
