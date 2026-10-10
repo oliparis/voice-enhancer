@@ -142,3 +142,19 @@ The view model ignores stale completions and makes repeated `start()` calls
 idempotent. Configuration notifications only restart a stopped engine or one
 whose hardware input format changed; delayed notifications from a healthy USB
 binding must not create a restart loop.
+
+## One capture instance
+
+Keep one Voice Enhancer app running when testing. Xcode can launch its own copy
+alongside a manually opened build. Both copies previously wrote to the same
+single-producer ring, corrupting audio even though each converter ran at the
+correct rate. Startup now detects another running app with the same bundle ID
+and reports an error before configuring capture or bumping the writer session.
+Quit the other copy and reopen the desired build. This check does not change the
+shared-memory protocol or require a driver reinstall.
+
+Local reproduction (2026-10-10): two app instances were present during a report
+of periodic chopping. After closing the older test copy, the producer supplied
+240,048 frames over five seconds. A separate four-second virtual-device probe
+received 192,000 frames, with zero exact-silence frames after startup warmup.
+Subjective confirmation from the user's listening test remains separate.
