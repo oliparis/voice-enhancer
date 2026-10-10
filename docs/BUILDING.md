@@ -231,3 +231,20 @@ window/Dock entry. Only Quit stops audio. Window identity uses its identifier,
 with the existing app title as fallback, so secondary sheets do not own capture.
 Adapted from wondervip PR #4. Manual acceptance: close/reopen/minimize, menu
 status/bypass/reconnect, Quit, light/dark and VoiceOver. Keep one app instance.
+
+## Working tuning and Custom recall
+
+Factory selection, compressor/de-esser thresholds and processing bypass are
+restored before capture. Editing a threshold promotes the working state to
+Custom and retains its factory base. Factory recall resets tuning (including
+same-factory recall); Custom recall restores the saved base/thresholds while
+keeping the current global bypass preference. Preview uses the same factory
+base. Factory IDs 0–3 are unchanged; Custom never enters the DSP factory ABI.
+
+The versioned defaults document is debounced for 200 ms off the audio callback
+and flushed on Quit. It retains a prior valid document and rejected bytes.
+Optional wondervip-key migration preserves old keys; legacy Custom uses Natural
+because its base was never recorded, with a visible recovery notice. Run
+`./scripts/test-settings.sh` for isolated persistence/migration/recovery checks.
+This stores today's editable controls, not named user presets or the planned
+complete Advanced chain; that future document must explicitly migrate this v1.

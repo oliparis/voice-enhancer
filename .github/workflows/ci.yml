@@ -110,6 +110,9 @@ jobs:
         working-directory: VoiceEnhancerApp
         run: swift run -c release CaptureRecoveryTests
 
+      - name: Run settings persistence checks
+        run: ./scripts/test-settings.sh
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
