@@ -77,7 +77,9 @@ These are useful early contributions, not blanket prerequisites for the DSP trac
 **Implementation update (2026-10-10):** keep the initial startup/cancellation and
 healthy-notification fixes as a smaller prerequisite PR (`fix/capture-startup`,
 currently stacked on R5). It has deterministic async lifecycle tests and local
-USB validation. Broader reconnect/backoff/device-removal behavior remains in R3.
+USB validation. Broader reconnect/backoff/device events are implemented on
+`fix/reconnect-recovery`; manual unplug/replug validation remains outstanding.
+Wake behavior is separately implemented on `fix/wake-recovery`.
 
 **Base:** R1 for recoverable tap failures; R2 if the chosen fallback selection requires it. **Scope:** bounded reconnect retries, cancellation, selected-device retention and overlapping event handling. Extend the existing recovery logic rather than replacing unrelated view-model/UI behavior. A manual retry action can live in existing Settings; it need not depend on a menu bar.
 

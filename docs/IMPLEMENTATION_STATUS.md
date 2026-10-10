@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated 10 October 2026. Work is pushed to the personal fork; no upstream PRs
+Updated 11 October 2026. Work is pushed to the personal fork; no upstream PRs
 or comments have been opened. Planning labels refer to
 [UPSTREAM_DELIVERY_PLAN.md](UPSTREAM_DELIVERY_PLAN.md).
 
@@ -135,6 +135,63 @@ rebase onto accepted prerequisites when preparing upstream submissions.
   fix if the problem persists; do not infer a sample-rate mismatch from the
   symptom alone.
 
+## R2 — Exclude the own virtual microphone
+
+- Independent branch: `fix/exclude-virtual-input`, directly from upstream main,
+  commit `97762e9`; integration equivalent: `4185ec3`.
+- Filter by stable device UID, not display name. A renamed own virtual device
+  remains excluded; an unrelated physical mic called Voice Enhancer remains
+  usable. Driver detection uses the unfiltered input inventory.
+- Resolve and bind the chosen input explicitly. Reject a saved own-virtual UID
+  or own-virtual system default with a clear Settings instruction; missing
+  saved physical devices fall back only to a safe default. Input selection
+  after failure retries capture.
+- `scripts/test-device-selection.sh`: 14 fixture checks passed. `--live`: 17
+  total checks passed, own virtual device excluded, installed driver detected,
+  USB Audio CODEC resolved, four selectable inputs. This live check does not
+  change device defaults or capture audio.
+
+## R3 — Coalesced reconnect and bounded retries
+
+- Branch: `fix/reconnect-recovery`, commit `0adf647`. Stacked on the existing
+  startup/native-format/single-instance fixes plus R2 (`2947bac`).
+- Integration equivalent: `cb9201e`.
+- A main-actor coordinator owns capture intent, delayed requests, generation
+  checks and retries. Retries use 250/500/1000 ms backoff; exhaustion reports
+  the last error while retaining intent so later device events can recover.
+- HAL listeners observe device inventory and default-input changes. Saved
+  selection is retained during safe temporary fallback; returning devices can
+  be preferred again. Intentionally stopped capture stays stopped.
+- Settings has a Reconnect microphone action. Unrelated menu-bar, login,
+  localization and preset persistence changes remain separate.
+- 15 deterministic recovery checks passed: success/idempotence, retries,
+  exhaustion, late device recovery, retained UID, burst coalescing, Stop during
+  debounce/permission and superseded completion. A controllable scheduler
+  deliberately completes cancelled waits late.
+
+## R4 — Wake recovery
+
+- Branch: `fix/wake-recovery`, based on R3, commit `6a988f4`.
+- Integration equivalent: `4029b23`.
+- Workspace wake requests a three-second delayed restart through the same
+  recovery coordinator. Device events can supersede it; intentional Stop is
+  respected. Observer registration is removed when its owner is released.
+- Recovery suite now passes 20 checks, including synthetic wake delay,
+  coalescing with device changes, stopped intent and observer teardown.
+- The Mac was not put to sleep; real sleep/wake remains a manual check.
+
+Combined validation: linked Debug Xcode build passed. The local app started
+USB capture at 44.1 kHz stereo and recovered from an initial engine
+reconfiguration. The native UI automation connection failed repeatedly while
+opening Settings, even after resetting it. Therefore Settings-button operation,
+light/dark screenshots and VoiceOver checks are not claimed complete. Real
+USB/Bluetooth unplug/replug, sleep/wake and follow-up listening remain manual
+acceptance checks before upstream submission.
+
+The user confirmed the previous single-instance listening build sounded good.
+The newer R2/R3/R4 build is a separate validation step. Test app instances are
+closed after checking; do not leave a manually launched copy beside Xcode.
+
 ## Local toolchain and test app
 
 Full Xcode is now installed and selected:
@@ -159,9 +216,9 @@ checks for R5; the DSP algorithm and driver code have not changed.
 2. Begin P1 (`fix/dsp-control-race`) from current upstream `main`: safe updates
    for the existing DSP setters, with focused concurrency/final-value regression
    tests and CPU evidence. Do not bring in the planning or integration branches.
-3. R2 (excluding virtual input) is another independently reviewable reliability
-   slice; the remaining R3/R4 work follows its documented dependencies. R5 and the
-   startup prerequisite now have local USB validation as recorded above.
+3. Complete manual hardware/UI acceptance for R2/R3/R4 as recorded above.
+   Menu-bar/Dock behavior, optional login integration and localization remain
+   separate contributions from wondervip's original PR.
 4. P2–P4 deliver complete snapshots, startup recall and named user presets
    before the larger Advanced UI.
 
