@@ -97,69 +97,37 @@ manual hardware validation. This guard is adapted from wondervip's
 
 ## Native microphone formats
 
-Microphone capture connects the hardware input at its native rate/channel
-count to a conversion mixer. The mixer outputs 48 kHz float32 with the original
-channel count; the DSP receives only channel 1. The main mixer is muted, so
-capture is not monitored through the speakers. A direct tap on the input node
-cannot request a different hardware format.
+Capture installs a native-rate/channel-count input tap and streams channel 1
+through AudioConverter to 48 kHz mono float32. It never opens an output route.
+This supports interfaces that expose separate input-only and output-only Core
+Audio devices; a muted playback mixer still requires a valid output and fails
+with `-10875` on these devices.
 
-`TapSupportTests` also renders the production graph without microphone access
-at 8/16/44.1/48/96 kHz in mono and stereo. It checks block-boundary continuity,
-first-channel level, separate stereo channels, output duration, downsampling
-rejection and live captured audio while the playback path is muted. Physical
-input-device and Bluetooth route changes still need a linked-app manual check.
+The converter retains phase/filter history, stages fixed 128-frame native
+slices, and emits at most 1024 frames per DSP call. Large tap buffers are split,
+not dropped. Buffers and converter are allocated and warmed before capture;
+48 kHz bypasses resampling. No application allocation, logging or dispatch is
+performed in the tap. The additional staging delay is at most 16 ms at 8 kHz,
+2.9 ms at 44.1 kHz, plus the converter's filter delay.
 
-## Install / uninstall
+`cd VoiceEnhancerApp && swift run -c release TapSupportTests` tests continuity
+across irregular blocks (including 1 and 32768 frames), signal level, duration,
+30-second fractional-rate conversion, downsampling rejection, empty buffers,
+and the existing tap exception checks. These synthetic checks need no devices.
 
-```sh
-sudo ./scripts/install.sh     # Copies the driver to /Library/Audio/Plug-Ins/HAL
-                              # and restarts coreaudiod.
-sudo ./scripts/uninstall.sh   # Removes the bundle, unlinks the shm segment.
-```
-
-Both scripts are idempotent — safe to re-run.
-
-## Signing and notarization
-
-Required for public distribution. Not required for local use on your own machine (though macOS will complain the first time).
+For an opt-in hardware smoke test, run:
 
 ```sh
-./scripts/notarize.sh \
-    "VoiceEnhancerApp/build/Build/Products/Release/Voice Enhancer.app" \
-    "VirtualDriver/build/VoiceEnhancer.driver"
+cd VoiceEnhancerApp
+swift run -c release TapSupportTests --live-input <AudioDeviceID>
 ```
 
-The script uses `xcrun notarytool` with a keychain profile (create once with `xcrun notarytool store-credentials aheadly-notary`). Override the identity and profile via `DEVELOPER_ID` and `NOTARY_PROFILE` env vars.
+Use a current numeric Core Audio input-device ID (not a persisted UID). This
+captures for two seconds and reports frame counts/conversion errors only. It
+does not save or play microphone audio, change device defaults, or use the HAL
+ring. Microphone access must be allowed for the invoking application. Verify
+the full app and virtual-mic routing separately.
 
-The HAL driver is a separately-loaded bundle — it must be independently signed and notarized. Gatekeeper checks it when `coreaudiod` loads the plugin.
-
-## Development loop
-
-The fastest iteration cycle for each layer:
-
-- **DSP (C++):** edit → `cmake --build AudioEngine/build && ./AudioEngine/build/voice_enhancer_tests`. Subsecond. Never leave this loop until tests are green.
-- **Driver (C++):** edit → `cmake --build VirtualDriver/build` → `sudo ./scripts/install.sh` (which restarts coreaudiod for you). Bundle reload is the slowest step — budget ~3 seconds.
-- **UI (Swift):** edit → ⌘R in Xcode. For compile-only checks, `swift build` inside `VoiceEnhancerApp/`.
-
-DSP changes should *never* require changing the Swift side. If they do, the C ABI needs adjustment — update the header comment explaining why.
-
-## Troubleshooting
-
-**"Voice Enhancer" doesn't appear in Zoom/Teams after installing the driver.**
-Restart `coreaudiod`: `sudo killall coreaudiod`. Check `Console.app` for errors from `tech.aheadly.voice-enhancer` or `VoiceEnhancer.driver`. Verify the bundle is at `/Library/Audio/Plug-Ins/HAL/VoiceEnhancer.driver` and is owned by `root:wheel`.
-
-**App crashes with `SIGBUS` / `EXC_BAD_ACCESS` in the audio callback.**
-Almost always an allocation or lock in `process()`. The audio thread is unforgiving. Run with Instruments' "System Trace" to find the offending call.
-
-**Silence after selecting Voice Enhancer as the mic.**
-The app isn't running, or isn't connected to the driver. The driver is a pure consumer — it has nothing to play until the app feeds it. Check that the main window says "Running" in the status pill.
-
-**"Voice Enhancer" shows up but audio is garbled or noisy.**
-Almost certainly a sample-rate mismatch between the physical mic and the ring format (48 kHz). The app installs an `AVAudioConverter` to handle this; if you see this symptom, file an issue with the output of `Audio MIDI Setup → Voice Enhancer → Format`.
-
-**`install.sh` succeeds but nothing appears.**
-The bundle may have been quarantined. Clear the quarantine flag:
-```sh
-sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/HAL/VoiceEnhancer.driver
-sudo killall coreaudiod
-```
+Local validation on 2026-10-10: Xcode 27, USB Audio CODEC input-only device,
+2 channels at 44.1 kHz; 83,790 native frames -> 91,080 converted frames,
+no errors. 82 synthetic checks passed. DSP/driver code is unchanged.

@@ -1,6 +1,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import "AVAudioTapInstaller.h"
-#import "CaptureGraph.h"
+#import "PCMConverter.h"
+#import <CoreAudio/CoreAudio.h>
 #include <math.h>
 #include <string.h>
 #include <stdatomic.h>
@@ -54,25 +55,6 @@
 }
 @end
 
-@interface VETapProbe : NSObject {
-@public
-    atomic_uint_fast64_t frames;
-    atomic_uint_fast64_t energy;
-    atomic_bool invalidFormat;
-}
-@end
-@implementation VETapProbe
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        atomic_init(&frames, 0);
-        atomic_init(&energy, 0);
-        atomic_init(&invalidFormat, false);
-    }
-    return self;
-}
-@end
-
 static int failures = 0;
 static int checks = 0;
 static void expect(BOOL condition, const char *description) {
@@ -83,156 +65,148 @@ static void expect(BOOL condition, const char *description) {
     }
 }
 
-// Render the production conversion graph with a player instead of hardware.
-// Unmute its downstream mixer only while inspecting converted samples; the
-// separate muted pass verifies that production setup does not monitor input.
-static NSData *renderCapture(double sourceRate, AVAudioChannelCount channels,
-                             BOOL irregularBlocks, double frequency, BOOL muted) {
-    AVAudioEngine *engine = [AVAudioEngine new];
-    AVAudioPlayerNode *player = [AVAudioPlayerNode new];
-    AVAudioMixerNode *captureMixer = [AVAudioMixerNode new];
-    [engine attachNode:player];
-    AVAudioFormat *native = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sourceRate channels:channels];
-    AVAudioFormat *converted = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000 channels:channels];
-    NSError *error = VEConfigureCaptureGraphSafely(engine, player, captureMixer, native, converted);
-    expect(error == nil, "conversion graph accepts native format");
-    if (error) {
-        fprintf(stderr, "Graph error: %s\n", error.localizedDescription.UTF8String);
-        return nil;
+// Append output only in tests; production writes directly into the DSP/ring.
+static void collectOutput(void *context, float *samples, UInt32 frames) {
+    NSMutableData *data = (__bridge NSMutableData *)context;
+    [data appendBytes:samples length:frames * sizeof(float)];
+}
+
+static NSData *convertSignal(double rate, BOOL irregular, double frequency, unsigned seconds) {
+    OSStatus error = noErr;
+    VEPCMConverter *converter = VEPCMConverterCreate(rate, &error);
+    expect(converter != NULL && error == noErr, "converter initializes");
+    if (!converter) return nil;
+    unsigned frames = (unsigned)(rate * seconds);
+    NSMutableData *source = [NSMutableData dataWithLength:frames * sizeof(float)];
+    float *samples = source.mutableBytes;
+    for (unsigned i = 0; i < frames; ++i) samples[i] = 0.25 * sin(2 * M_PI * frequency * i / rate);
+    NSMutableData *result = [NSMutableData data];
+    const unsigned sizes[] = {1, 113, 509, 4800, 37, 32768};
+    BOOL succeeded = YES;
+    for (unsigned offset = 0, block = 0; offset < frames; ++block) {
+        unsigned count = irregular ? sizes[block % 6] : 512;
+        count = MIN(count, frames - offset);
+        error = VEPCMConverterProcess(converter, samples + offset, count, collectOutput, (__bridge void *)result);
+        if (error != noErr) { succeeded = NO; break; }
+        offset += count;
     }
-    expect(engine.mainMixerNode.outputVolume == 0, "capture graph is muted downstream");
-    expect(captureMixer.outputVolume == 1, "capture mixer preserves input level");
-    AVAudioFormat *actual = [captureMixer outputFormatForBus:0];
-    expect(actual.sampleRate == 48000 && actual.channelCount == channels,
-           "capture output is 48 kHz with original channel count");
-    // Check tap installation on the converted bus, where formats must match.
-    VETapProbe *probe = [VETapProbe new];
-    error = VEInstallInputTapSafely(captureMixer, 0, 512, converted,
-                                  ^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
-        if (buffer.format.sampleRate != 48000 || buffer.format.channelCount != channels) {
-            atomic_store(&probe->invalidFormat, true);
-        }
-        double sum = 0;
-        for (AVAudioFrameCount i = 0; i < buffer.frameLength; ++i) {
-            double sample = buffer.floatChannelData[0][i];
-            sum += sample * sample;
-        }
-        atomic_fetch_add(&probe->energy, (uint_fast64_t)(sum * 1e9));
-        atomic_fetch_add(&probe->frames, buffer.frameLength);
-    });
-    expect(error == nil, "converted mixer tap installs without format mismatch");
-    engine.mainMixerNode.outputVolume = muted ? 0 : 1;
-    if (![engine enableManualRenderingMode:AVAudioEngineManualRenderingModeOffline
-                                   format:converted maximumFrameCount:4096 error:&error]) {
-        expect(NO, "manual rendering setup succeeds");
-        fprintf(stderr, "Manual error: %s\n", error.localizedDescription.UTF8String);
-        return nil;
-    }
-    AVAudioPCMBuffer *input = [[AVAudioPCMBuffer alloc] initWithPCMFormat:native
-                                                         frameCapacity:(AVAudioFrameCount)(sourceRate * 2)];
-    input.frameLength = input.frameCapacity;
-    for (AVAudioChannelCount channel = 0; channel < channels; ++channel) {
-        for (AVAudioFrameCount i = 0; i < input.frameLength; ++i) {
-            double hz = channel == 0 ? frequency : 2000;
-            double amplitude = channel == 0 ? 0.25 : 0.5;
-            input.floatChannelData[channel][i] = (float)(amplitude * sin(2 * M_PI * hz * i / sourceRate));
-        }
-    }
-    [player scheduleBuffer:input completionHandler:nil];
-    if (![engine startAndReturnError:&error]) {
-        expect(NO, "offline engine starts");
-        return nil;
-    }
-    [player play];
-    const AVAudioFrameCount frames = 24000;
-    NSMutableData *result = [NSMutableData dataWithLength:frames * channels * sizeof(float)];
-    float *samples = result.mutableBytes;
-    AVAudioPCMBuffer *output = [[AVAudioPCMBuffer alloc] initWithPCMFormat:converted frameCapacity:4096];
-    AVAudioFrameCount position = 0;
-    const AVAudioFrameCount sizes[] = {113, 509, 2048, 37};
-    unsigned block = 0;
-    while (position < frames) {
-        AVAudioFrameCount requested = irregularBlocks ? sizes[(block++) % 4] : 4096;
-        requested = MIN(requested, frames - position);
-        AVAudioEngineManualRenderingStatus status = [engine renderOffline:requested toBuffer:output error:&error];
-        if (status != AVAudioEngineManualRenderingStatusSuccess || output.frameLength != requested) {
-            expect(NO, "offline rendering supplies every requested frame");
-            fprintf(stderr, "Render status: %ld, error: %s\n", (long)status,
-                    error ? error.localizedDescription.UTF8String : "none");
-            [engine stop];
-            return nil;
-        }
-        for (AVAudioChannelCount channel = 0; channel < channels; ++channel) {
-            memcpy(samples + channel * frames + position, output.floatChannelData[channel],
-                   requested * sizeof(float));
-        }
-        position += requested;
-    }
-    if (muted) {
-        // Taps are delivered asynchronously. Wait outside the render block.
-        for (unsigned attempt = 0; attempt < 1000 && atomic_load(&probe->frames) < frames / 2; ++attempt) {
-            usleep(1000);
-        }
-        expect(atomic_load(&probe->frames) >= frames / 2,
-               "muted playback still delivers captured frames");
-        expect(atomic_load(&probe->energy) > 1000000,
-               "muted playback does not mute the capture tap");
-        expect(!atomic_load(&probe->invalidFormat), "tap buffers use the converted format");
-    }
-    [engine stop];
-    expect(VERemoveInputTapSafely(captureMixer, 0) == nil, "converted mixer tap removes");
-    expect(position == frames, "converted output has exact requested duration");
+    expect(succeeded, "all native input blocks convert without error");
+    VEPCMConverterDestroy(converter);
     return result;
 }
 
 static double rms(const float *samples, unsigned count) {
-    double sum = 0;
-    for (unsigned i = 0; i < count; ++i) sum += (double)samples[i] * samples[i];
-    return sqrt(sum / count);
+    double energy = 0;
+    for (unsigned i = 0; i < count; ++i) energy += samples[i] * samples[i];
+    return sqrt(energy / count);
+}
+
+static void mutateOutput(void *context, float *samples, UInt32 frames) {
+    *(UInt32 *)context += frames;
+    memset(samples, 0, frames * sizeof(float));
 }
 
 static void testNativeConversion(void) {
-    AVAudioEngine *invalidEngine = [AVAudioEngine new];
-    AVAudioPlayerNode *invalidSource = [AVAudioPlayerNode new];
-    AVAudioMixerNode *invalidMixer = [AVAudioMixerNode new];
-    AVAudioFormat *stereo = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:44100 channels:2];
-    AVAudioFormat *mono = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000 channels:1];
-    expect(VEConfigureCaptureGraphSafely(invalidEngine, invalidSource, invalidMixer, stereo, mono) != nil,
-           "channel-changing configuration is rejected before graph mutation");
-    expect(![invalidEngine.attachedNodes containsObject:invalidMixer], "invalid graph stays unmodified");
-    const double rates[] = {8000, 16000, 44100, 48000, 96000};
-    for (unsigned rateIndex = 0; rateIndex < 5; ++rateIndex) {
-        for (AVAudioChannelCount channels = 1; channels <= 2; ++channels) {
-            NSData *regular = renderCapture(rates[rateIndex], channels, NO, 1000, NO);
-            NSData *irregular = renderCapture(rates[rateIndex], channels, YES, 1000, NO);
-            if (!regular || !irregular) continue;
-            const float *a = regular.bytes;
-            const float *b = irregular.bytes;
-            double maximumDifference = 0;
-            BOOL finite = YES;
-            for (unsigned i = 0; i < 24000 * channels; ++i) {
-                finite = finite && isfinite(a[i]) && isfinite(b[i]);
-                maximumDifference = fmax(maximumDifference, fabs((double)a[i] - b[i]));
-            }
-            expect(finite, "converted samples are finite");
-            expect(maximumDifference < 0.001, "conversion is independent of render block boundaries");
-            expect(fabs(rms(a + 4096, 19904) - 0.25 / sqrt(2)) < 0.003,
-                   "first channel level survives conversion");
-            if (channels == 2) {
-                expect(fabs(rms(a + 24000 + 4096, 19904) - 0.5 / sqrt(2)) < 0.003,
-                       "second channel remains separate rather than mixing into first");
-            }
+    const double rates[] = {8000, 16000, 44100, 48000, 96000, 192000};
+    for (unsigned rate = 0; rate < 6; ++rate) {
+        NSData *regular = convertSignal(rates[rate], NO, 1000, 2);
+        NSData *irregular = convertSignal(rates[rate], YES, 1000, 2);
+        if (!regular || !irregular) continue;
+        fprintf(stderr, "rate %.0f regular %lu irregular %lu\n", rates[rate], regular.length / sizeof(float), irregular.length / sizeof(float));
+        expect(regular.length == irregular.length, "output duration does not depend on input chunking");
+        unsigned frames = (unsigned)MIN(regular.length, irregular.length) / sizeof(float);
+        // A continuous stream keeps a small filter tail pending until future
+        // input arrives; it must not lose duration at each tap boundary.
+        expect(frames > 95000 && frames <= 96000, "two seconds preserved apart from bounded filter latency");
+        const float *a = regular.bytes, *b = irregular.bytes;
+        double difference = 0;
+        BOOL finite = YES;
+        for (unsigned i = 0; i < frames; ++i) {
+            finite = finite && isfinite(a[i]) && isfinite(b[i]);
+            difference = fmax(difference, fabs((double)a[i] - b[i]));
         }
+        expect(finite, "conversion produces finite samples");
+        expect(difference < 0.00001, "phase and filter history survive arbitrary tap boundaries");
+        if (frames > 4096) expect(fabs(rms(a + 4096, frames - 4096) - 0.25 / sqrt(2)) < 0.003,
+                                  "voice-band signal level survives conversion");
     }
-    NSData *muted = renderCapture(44100, 2, NO, 1000, YES);
-    if (muted) expect(rms(muted.bytes, 48000) < 1e-6, "production playback path stays silent");
-    NSData *rejected = renderCapture(96000, 1, NO, 30000, NO);
-    if (rejected) expect(rms((const float *)rejected.bytes + 4096, 19904) < 0.01,
-                         "downsampling suppresses above-Nyquist input");
+    NSData *rejected = convertSignal(96000, YES, 30000, 2);
+    if (rejected.length > 4096 * sizeof(float)) {
+        expect(rms((const float *)rejected.bytes + 4096, (unsigned)rejected.length / sizeof(float) - 4096) < 0.01,
+               "downsampling rejects above-Nyquist input");
+    }
+    NSData *longStream = convertSignal(44100, YES, 1000, 30);
+    expect(longStream.length / sizeof(float) > 30 * 48000 - 1000 &&
+           longStream.length / sizeof(float) <= 30 * 48000,
+           "fractional rate conversion does not accumulate duration loss");
+    OSStatus error;
+    expect(VEPCMConverterCreate(0, &error) == NULL && error != noErr, "invalid rate rejected");
+    expect(VEPCMConverterCreate(NAN, &error) == NULL && error != noErr, "NaN rate rejected");
+    VEPCMConverter *converter = VEPCMConverterCreate(48000, &error);
+    float input[32768];
+    for (unsigned i = 0; i < 32768; ++i) input[i] = 0.25f;
+    UInt32 count = 0;
+    expect(VEPCMConverterProcess(converter, input, 32768, mutateOutput, &count) == noErr && count == 32768,
+           "oversized taps split into bounded DSP blocks without truncation");
+    expect(input[0] == 0.25f && input[32767] == 0.25f, "DSP mutations cannot overwrite the input tap");
+    expect(VEPCMConverterProcess(converter, input, 0, mutateOutput, &count) == noErr && count == 32768,
+           "empty input produces no duplicate output");
+    VEPCMConverterDestroy(converter);
 }
 
-int main(void) {
+// Opt-in hardware smoke test. Counts frames only; never saves or plays audio.
+typedef struct {
+    atomic_uint_fast64_t nativeFrames;
+    atomic_uint_fast64_t convertedFrames;
+    atomic_int error;
+} VELiveProbe;
+static void countLiveOutput(void *context, float *samples, UInt32 frames) {
+    VELiveProbe *probe = context;
+    atomic_fetch_add(&probe->convertedFrames, frames);
+}
+static int testLiveInput(AudioDeviceID device) {
+    AVAudioEngine *engine = [AVAudioEngine new];
+    OSStatus status = AudioUnitSetProperty(engine.inputNode.audioUnit, kAudioOutputUnitProperty_CurrentDevice,
+                                          kAudioUnitScope_Global, 0, &device, sizeof(device));
+    expect(status == noErr, "bind live input device");
+    AVAudioFormat *native = [engine.inputNode inputFormatForBus:0];
+    fprintf(stderr, "Live input %u: %.0f Hz, %u channels\n", device, native.sampleRate, native.channelCount);
+    VEPCMConverter *converter = VEPCMConverterCreate(native.sampleRate, &status);
+    if (!converter || !native.channelCount) { expect(NO, "valid live input format"); return 1; }
+    VELiveProbe probe;
+    atomic_init(&probe.nativeFrames, 0);
+    atomic_init(&probe.convertedFrames, 0);
+    atomic_init(&probe.error, 0);
+    VELiveProbe *p = &probe;
+    NSError *error = VEInstallInputTapSafely(engine.inputNode, 0, 512, native, ^(AVAudioPCMBuffer *buffer, AVAudioTime *time) {
+        atomic_fetch_add(&p->nativeFrames, buffer.frameLength);
+        OSStatus result = VEPCMConverterProcess(converter, buffer.floatChannelData[0], buffer.frameLength, countLiveOutput, p);
+        if (result) atomic_store(&p->error, result);
+    });
+    expect(error == nil, "install native hardware tap");
+    BOOL started = error == nil && [engine startAndReturnError:&error];
+    expect(started, "input-only engine starts on physical device");
+    if (error) fprintf(stderr, "%s\n", error.description.UTF8String);
+    if (started) usleep(2000000);
+    [engine stop];
+    VERemoveInputTapSafely(engine.inputNode, 0);
+    // Tap removal joins callbacks before the converter/probe are released.
+    uint64_t source = atomic_load(&probe.nativeFrames), converted = atomic_load(&probe.convertedFrames);
+    fprintf(stderr, "Native frames: %llu; converted frames: %llu; conversion error: %d\n",
+            source, converted, atomic_load(&probe.error));
+    expect(source > native.sampleRate, "physical microphone supplies sustained input");
+    expect(converted > 48000 && fabs(converted - source * 48000.0 / native.sampleRate) < 1000,
+           "live output duration matches native stream at 48 kHz");
+    expect(atomic_load(&probe.error) == noErr, "live conversion has no errors");
+    VEPCMConverterDestroy(converter);
+    return failures ? 1 : 0;
+}
+
+int main(int argc, char **argv) {
     @autoreleasepool {
+        if (argc == 3 && strcmp(argv[1], "--live-input") == 0) {
+            return testLiveInput((AudioDeviceID)strtoul(argv[2], NULL, 10));
+        }
         AVAudioFormat *format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000 channels:1];
         __block BOOL callbackRan = NO;
         AVAudioNodeTapBlock block = ^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
