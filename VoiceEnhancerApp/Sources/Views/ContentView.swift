@@ -66,6 +66,7 @@ private struct HeaderView: View {
             }
             .buttonStyle(.borderless)
             .help(audio.t(.settings))
+            .accessibilityLabel(audio.t(.settings))
 
             Toggle("", isOn: $audio.isEnabled)
                 .toggleStyle(.switch)

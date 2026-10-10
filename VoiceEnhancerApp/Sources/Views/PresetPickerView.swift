@@ -25,16 +25,17 @@ struct PresetPickerView: View {
 
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(Preset.allCases.filter { $0.isFactoryPreset }) { preset in
-                    PresetCardView(
-                        preset: preset,
-                        isSelected: audio.selectedPreset == preset,
-                        language: audio.appLanguage
-                    )
-                    .onTapGesture {
+                    Button {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                             audio.recallPreset(preset)
                         }
+                    } label: {
+                        PresetCardView(preset: preset, isSelected: audio.selectedPreset == preset,
+                                       language: audio.appLanguage)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(preset.name(language: audio.appLanguage))
+                    .accessibilityHint(preset.blurb(language: audio.appLanguage))
                 }
             }
             Button { audio.recallPreset(.custom) } label: {
