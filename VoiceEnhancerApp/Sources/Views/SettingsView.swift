@@ -42,6 +42,9 @@ struct SettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
 
+                    Button("Reconnect microphone") { audio.retryCapture() }
+                        .help("Retry capture from the selected microphone")
+
                     Text("Voice Enhancer reads from this microphone and publishes the enhanced signal to the virtual input device.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

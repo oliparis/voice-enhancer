@@ -105,6 +105,10 @@ jobs:
       - name: Run device selection regression checks
         run: ./scripts/test-device-selection.sh
 
+      - name: Run capture recovery regression checks
+        working-directory: VoiceEnhancerApp
+        run: swift run -c release CaptureRecoveryTests
+
       - name: Upload driver artifact
         uses: actions/upload-artifact@v4
         with:

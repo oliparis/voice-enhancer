@@ -3,6 +3,9 @@ import SwiftUI
 import Combine
 import CoreAudio
 import os
+#if canImport(CaptureLifecycle)
+import CaptureLifecycle
+#endif
 
 /// Main view model for the app.
 ///
@@ -79,10 +82,7 @@ final class AudioViewModel: ObservableObject {
             guard oldValue != selectedInputUID else { return }
             UserDefaults.standard.set(selectedInputUID, forKey: Self.inputUIDDefaultsKey)
             // Hot-swap: restart the capture graph with the new device.
-            Task {
-                if case .failed = status { await start() }
-                else { await restartCaptureIfRunning() }
-            }
+            recovery.requestRestart()
         }
     }
 
@@ -104,13 +104,15 @@ final class AudioViewModel: ObservableObject {
     private let capture: MicCapture
     private let preview = VoicePreview()
     private var meterTimer: Timer?
-    private var configurationRestartTask: Task<Void, Never>?
-    private var configurationStabilityTask: Task<Void, Never>?
-    private var desiredRunningState = false
-    private var captureRequest: UInt64 = 0
-    private var configurationRestartAttempts = 0
-
-    private static let maxConfigurationRestartAttempts = 3
+    private var deviceMonitor: AudioDeviceMonitor?
+    private lazy var recovery = CaptureRecoveryCoordinator(
+        start: { [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.beginCaptureGraph()
+        },
+        stop: { [weak self] in self?.stopCaptureGraph() },
+        publish: { [weak self] in self?.publishCaptureState($0) }
+    )
 
     // MARK: - Init
 
@@ -122,13 +124,16 @@ final class AudioViewModel: ObservableObject {
         self.ring = ring
         self.capture = MicCapture(engineBridge: bridge, ringBridge: ring)
         self.capture.engineConfigurationChangeHandler = { [weak self] in
-            Task { @MainActor in
-                await self?.handleCaptureConfigurationChange()
-            }
+            self?.recovery.requestRestart()
         }
         self.inputDevices = AudioDeviceEnumerator.listInputDevices()
         self.driverAvailable = AudioDeviceEnumerator.hasVoiceEnhancerDriver() || ring.isOpen
         self.selectedInputUID = UserDefaults.standard.string(forKey: Self.inputUIDDefaultsKey)
+        self.deviceMonitor = AudioDeviceMonitor { [weak self] in
+            guard let self else { return }
+            self.refreshDeviceList()
+            self.recovery.requestRestart()
+        }
 
         // Wire preview: tap raw audio from capture, publish state changes.
         let prev = self.preview
@@ -144,114 +149,38 @@ final class AudioViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
-    func start() async {
-        guard !desiredRunningState else { return }
-        desiredRunningState = true
-        await startCaptureGraph()
-    }
+    func start() async { await recovery.start() }
 
-    func stop() {
-        desiredRunningState = false
-        configurationRestartTask?.cancel()
-        configurationRestartTask = nil
-        configurationStabilityTask?.cancel()
-        configurationStabilityTask = nil
-        configurationRestartAttempts = 0
-        stopCaptureGraph(updateStatus: true)
-    }
+    func stop() { recovery.stop() }
 
-    /// Restart the capture graph. Used when the user switches input devices
-    /// or the device list changes. No-op when the graph isn't running.
-    private func restartCaptureIfRunning() async {
-        guard desiredRunningState else { return }
-        stopCaptureGraph(updateStatus: false)
-        await startCaptureGraph()
-    }
+    func retryCapture() { Task { await recovery.retry() } }
 
-    private func startCaptureGraph() async {
-        captureRequest &+= 1
-        let request = captureRequest
-        logger.notice("startCaptureGraph called")
-        status = .starting
+    private func beginCaptureGraph() async throws {
         refreshDeviceList()
-
-        do {
-            // Resolve a missing saved device to a safe system default, and
-            // never let the engine select our own virtual microphone.
-            let device = try AudioDeviceEnumerator.captureInput(preferredUID: selectedInputUID)
-            try await capture.start(deviceID: device.deviceID)
-            guard request == captureRequest, desiredRunningState else { return }
-
-            startMeterPolling()
-            configurationRestartTask?.cancel()
-            configurationRestartTask = nil
-            status = .running
-            scheduleConfigurationRestartBudgetReset()
-        } catch {
-            guard request == captureRequest else { return }
-            desiredRunningState = false
-            status = .failed(error.localizedDescription)
-            logger.error("startCaptureGraph failed: \(error.localizedDescription, privacy: .public)")
-        }
+        let device = try AudioDeviceEnumerator.captureInput(preferredUID: selectedInputUID)
+        try await capture.start(deviceID: device.deviceID)
     }
 
-    private func stopCaptureGraph(updateStatus: Bool) {
-        captureRequest &+= 1
+    private func stopCaptureGraph() {
         capture.stop()
         stopMeterPolling()
         inputPeak = 0
         outputPeak = 0
         compressorGrDb = 0
         deesserGrDb = 0
-        if updateStatus {
-            status = .idle
-        }
     }
 
-    private func handleCaptureConfigurationChange() async {
-        guard desiredRunningState else { return }
-        guard configurationRestartTask == nil else { return }
-
-        configurationStabilityTask?.cancel()
-        configurationStabilityTask = nil
-        configurationRestartAttempts += 1
-        guard configurationRestartAttempts <= Self.maxConfigurationRestartAttempts else {
-            logger.error("Capture graph exceeded configuration restart budget")
-            desiredRunningState = false
-            stopCaptureGraph(updateStatus: false)
-            status = .failed("Audio device kept reconfiguring. Reopen the app or reselect the microphone.")
-            return
+    private func publishCaptureState(_ state: CaptureRecoveryCoordinator.State) {
+        switch state {
+        case .idle: status = .idle
+        case .starting: status = .starting
+        case .running:
+            startMeterPolling()
+            status = .running
+        case .failed(let message):
+            status = .failed(message)
+            logger.error("Capture recovery exhausted: \(message, privacy: .public)")
         }
-
-        logger.notice("Restarting capture after engine configuration change (attempt \(self.configurationRestartAttempts, privacy: .public))")
-        status = .starting
-        configurationRestartTask = Task { [weak self] in
-            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
-            await self?.restartAfterConfigurationChange()
-        }
-    }
-
-    private func restartAfterConfigurationChange() async {
-        defer { configurationRestartTask = nil }
-        guard desiredRunningState else { return }
-        stopCaptureGraph(updateStatus: false)
-        await startCaptureGraph()
-    }
-
-    private func scheduleConfigurationRestartBudgetReset() {
-        configurationStabilityTask?.cancel()
-        configurationStabilityTask = Task { [weak self] in
-            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
-            await MainActor.run {
-                self?.resetConfigurationRestartBudget()
-            }
-        }
-    }
-
-    private func resetConfigurationRestartBudget() {
-        guard desiredRunningState, status == .running else { return }
-        configurationRestartAttempts = 0
-        configurationStabilityTask = nil
     }
 
     // MARK: - Voice Preview

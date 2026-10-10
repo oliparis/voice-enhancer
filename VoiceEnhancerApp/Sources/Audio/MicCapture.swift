@@ -40,7 +40,7 @@ final class MicCapture {
     private let ringBridge: RingBufferBridge
     private var avEngine = AVAudioEngine()
     private let startCoordinator: CaptureStartCoordinator
-    var engineConfigurationChangeHandler: (() -> Void)?
+    var engineConfigurationChangeHandler: (@MainActor () -> Void)?
 
     /// Optional tap that receives raw pre-DSP audio (48 kHz mono float32).
     /// Used by VoicePreview to capture a test clip. RT-safe requirement:

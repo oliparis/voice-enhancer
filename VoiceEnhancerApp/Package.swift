@@ -21,6 +21,8 @@ let package = Package(
     ],
     targets: [
         .target(name: "CaptureLifecycle", path: "Sources/Audio/Lifecycle"),
+        .executableTarget(name: "CaptureRecoveryTests", dependencies: ["CaptureLifecycle"],
+                          path: "Tests/CaptureRecoveryTests"),
         .executableTarget(name: "CaptureLifecycleTests", dependencies: ["CaptureLifecycle"],
                           path: "Tests/CaptureLifecycleTests"),
         .target(
