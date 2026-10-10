@@ -103,6 +103,9 @@ jobs:
         working-directory: VoiceEnhancerApp
         run: swift run -c release CaptureLifecycleTests
 
+      - name: Run device selection regression checks
+        run: ./scripts/test-device-selection.sh
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

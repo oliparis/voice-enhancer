@@ -162,3 +162,18 @@ of periodic chopping. After closing the older test copy, the producer supplied
 240,048 frames over five seconds. A separate four-second virtual-device probe
 received 192,000 frames, with zero exact-silence frames after startup warmup.
 Subjective confirmation from the user's listening test remains separate.
+
+## Input selection regression checks
+
+Run `./scripts/test-device-selection.sh` on macOS. This compiles the production
+model/enumerator with fixture tests: renamed virtual device, same-named physical
+microphone, missing saved input, safe fallback, virtual default, and no input.
+`--live` additionally checks the installed driver and current input inventory;
+it neither captures audio nor changes the system defaults.
+
+The own virtual microphone is identified by its stable UID and excluded from
+selectable inputs. Driver detection uses the unfiltered inventory. Capture binds
+a resolved input explicitly; an unsafe virtual default or saved virtual UID
+produces an actionable error rather than reading the app's own output. Selecting
+another input after failure retries capture. Adapted from wondervip PR #4's
+virtual-input filtering, extended to cover implicit default routing.
