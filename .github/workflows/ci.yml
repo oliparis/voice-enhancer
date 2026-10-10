@@ -93,6 +93,11 @@ jobs:
         # builds happen in an Xcode project that isn't checked in yet.
         run: swift build -c release
 
+      # The runner uses a fake node and does not request microphone access.
+      - name: Run audio tap regression checks
+        working-directory: VoiceEnhancerApp
+        run: swift run -c release TapSupportTests
+
       - name: Upload driver artifact
         uses: actions/upload-artifact@v4
         with:
