@@ -113,6 +113,9 @@ jobs:
       - name: Run settings persistence checks
         run: ./scripts/test-settings.sh
 
+      - name: Run login item checks
+        run: ./scripts/test-login-item.sh
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
