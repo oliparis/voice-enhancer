@@ -9,6 +9,7 @@ import SwiftUI
 struct PresetCardView: View {
     let preset: Preset
     let isSelected: Bool
+    var language: AppLanguage = .english
 
     @State private var isHovering = false
 
@@ -19,11 +20,11 @@ struct PresetCardView: View {
                 .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                 .frame(height: 28)
 
-            Text(preset.name)
+            Text(preset.name(language: language))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
 
-            Text(preset.blurb)
+            Text(preset.blurb(language: language))
                 .font(.system(size: 10, weight: .regular))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -39,8 +40,8 @@ struct PresetCardView: View {
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
-        .accessibilityLabel(preset.name)
-        .accessibilityHint(preset.blurb)
+        .accessibilityLabel(preset.name(language: language))
+        .accessibilityHint(preset.blurb(language: language))
     }
 
     // MARK: - Styling

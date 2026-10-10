@@ -76,6 +76,7 @@ struct VoiceEnhancerApp: App {
         Window("Voice Enhancer", id: "main") {
             ContentView()
                 .environmentObject(audio)
+                .environment(\.layoutDirection, audio.appLanguage.layoutDirection)
                 .frame(minWidth: 520, minHeight: 420)
                 .task {
                     // Start the audio graph when the window first appears.
@@ -99,11 +100,12 @@ struct VoiceEnhancerApp: App {
         MenuBarExtra {
             MenuBarControls()
                 .environmentObject(audio)
+                .environment(\.layoutDirection, audio.appLanguage.layoutDirection)
         } label: {
             Image(systemName: audio.status.menuBarSystemImage(isEnabled: audio.isEnabled))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(audio.status.menuBarColor(isEnabled: audio.isEnabled))
-                .help(audio.status.displayText)
+                .help(audio.statusText(audio.status))
         }
     }
 }
@@ -114,7 +116,7 @@ private struct MenuBarControls: View {
 
     var body: some View {
         Label {
-            Text(audio.status.displayText)
+            Text(audio.statusText(audio.status))
         } icon: {
             Image(systemName: audio.status.menuBarSystemImage(isEnabled: audio.isEnabled))
                 .foregroundStyle(audio.status.menuBarColor(isEnabled: audio.isEnabled))
@@ -122,21 +124,21 @@ private struct MenuBarControls: View {
 
         Divider()
 
-        Button("Open Voice Enhancer") {
+        Button(audio.t(.openApp)) {
             showMainWindow()
         }
 
-        Button(audio.isEnabled ? "Turn Processing Off" : "Turn Processing On") {
+        Button(audio.isEnabled ? audio.t(.turnProcessingOff) : audio.t(.turnProcessingOn)) {
             audio.isEnabled.toggle()
         }
 
-        Button("Reconnect microphone") {
+        Button(audio.t(.reconnectMicrophone)) {
             audio.retryCapture()
         }
 
         Divider()
 
-        Button("Quit") {
+        Button(audio.t(.quit)) {
             audio.stop()
             NSApp.terminate(nil)
         }

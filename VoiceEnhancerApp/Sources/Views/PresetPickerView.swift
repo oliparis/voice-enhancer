@@ -21,13 +21,14 @@ struct PresetPickerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "Preset")
+            SectionHeader(title: audio.t(.preset))
 
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(Preset.allCases.filter { $0.isFactoryPreset }) { preset in
                     PresetCardView(
                         preset: preset,
-                        isSelected: audio.selectedPreset == preset
+                        isSelected: audio.selectedPreset == preset,
+                        language: audio.appLanguage
                     )
                     .onTapGesture {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -37,15 +38,15 @@ struct PresetPickerView: View {
                 }
             }
             Button { audio.recallPreset(.custom) } label: {
-                Label(Preset.custom.name, systemImage: Preset.custom.systemImage)
+                Label(Preset.custom.name(language: audio.appLanguage), systemImage: Preset.custom.systemImage)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .tint(audio.selectedPreset == .custom ? .accentColor : .secondary)
             .accessibilityAddTraits(audio.selectedPreset == .custom ? .isSelected : [])
-            .help(Preset.custom.blurb)
+            .help(Preset.custom.blurb(language: audio.appLanguage))
             if let notice = audio.settingsRecoveryNotice {
-                Text(notice).font(.caption).foregroundStyle(.secondary)
+                Text(notice.text(language: audio.appLanguage)).font(.caption).foregroundStyle(.secondary)
             }
         }
     }

@@ -63,6 +63,23 @@ final class AudioViewModel: ObservableObject {
         }
     }
 
+    @Published var appLanguage: AppLanguage = .preferred() {
+        didSet { UserDefaults.standard.set(appLanguage.rawValue, forKey: "tech.aheadly.voice-enhancer.appLanguage") }
+    }
+
+    func t(_ key: LocalizedStrings.Key, _ arguments: CVarArg...) -> String {
+        LocalizedStrings.text(key, language: appLanguage, arguments: arguments)
+    }
+
+    func statusText(_ status: Status) -> String {
+        switch status {
+        case .idle: return t(.idle)
+        case .starting: return t(.starting)
+        case .running: return t(.running)
+        case .failed(let message): return t(.errorPrefix, message)
+        }
+    }
+
     /// Human-readable status string shown in the toolbar.
     @Published private(set) var status: Status = .idle {
         didSet { NSApp.dockTile.badgeLabel = status.isError ? "!" : nil }
@@ -109,7 +126,7 @@ final class AudioViewModel: ObservableObject {
     private var baseWasRecovered = false
     private var isApplyingSettings = false
     private var settingsSaveTask: Task<Void, Never>?
-    @Published private(set) var settingsRecoveryNotice: String?
+    @Published private(set) var settingsRecoveryNotice: SettingsRecoveryNotice?
 
     private let bridge: AudioEngineBridge
     private let ring: RingBufferBridge
@@ -142,6 +159,8 @@ final class AudioViewModel: ObservableObject {
         self.inputDevices = AudioDeviceEnumerator.listInputDevices()
         self.driverAvailable = AudioDeviceEnumerator.hasVoiceEnhancerDriver() || ring.isOpen
         self.selectedInputUID = UserDefaults.standard.string(forKey: Self.inputUIDDefaultsKey)
+        if let code = UserDefaults.standard.string(forKey: "tech.aheadly.voice-enhancer.appLanguage"),
+           let language = AppLanguage(rawValue: code) { self.appLanguage = language }
         let restored = settingsStore.load()
         self.customSettings = restored.custom
         self.settingsRecoveryNotice = settingsStore.recoveryNotice

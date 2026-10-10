@@ -260,3 +260,15 @@ not support production registration; validate an installed, signed app before
 release. `./scripts/test-login-item.sh` injects failures, external revocation and
 pending approval without registering/unregistering the real app. Adapted from
 wondervip PR #4, with explicit approval-state handling.
+
+## App languages
+
+Settings supports English, Simplified Chinese, Hindi, Spanish, Arabic, French,
+Bengali, Portuguese, Russian and Japanese. The selected language persists;
+Arabic uses RTL presentation without changing audio state. Translation data is
+adapted from wondervip PR #4, with missing login strings and new recovery/status
+strings added. `./scripts/test-localization.sh` checks key coverage and format
+placeholders in every language, formatting, locale fallback and RTL selection.
+These checks do not certify translation quality; native-language review,
+long-text layout and VoiceOver/light/dark validation remain release checks.
+System/Core Audio error details retain the language supplied by macOS.
