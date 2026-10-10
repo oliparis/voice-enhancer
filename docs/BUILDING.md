@@ -69,7 +69,11 @@ Output: `VirtualDriver/build/VoiceEnhancer.driver` (a bundle directory).
 Two paths:
 
 1. **Shipping build (Xcode project required).**
-   Open the Xcode project in `VoiceEnhancerApp/` and build the `VoiceEnhancer` scheme. The Xcode project is not checked in yet; generate one with `xcodegen` from `VoiceEnhancerApp/project.yml` (coming in a future PR).
+   Generate the project with `cd VoiceEnhancerApp && xcodegen generate`,
+   then open it and build the `VoiceEnhancer` scheme. The project is derived
+   from `VoiceEnhancerApp/project.yml` and is not checked into version control.
+   CI builds this linked app without signing as well as checking SwiftPM;
+   the SwiftPM stub alone does not validate the shipping C/Objective-C bridge.
 
 2. **Compile check (SwiftPM).** Works everywhere.
 
