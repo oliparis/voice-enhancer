@@ -93,6 +93,9 @@ jobs:
         # builds happen in an Xcode project that isn't checked in yet.
         run: swift build -c release
 
+      - name: Run login item checks
+        run: ./scripts/test-login-item.sh
+
       - name: Upload driver artifact
         uses: actions/upload-artifact@v4
         with:

@@ -134,3 +134,15 @@ The bundle may have been quarantined. Clear the quarantine flag:
 sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/HAL/VoiceEnhancer.driver
 sudo killall coreaudiod
 ```
+
+## Launch at login
+
+Settings reads the current `SMAppService.mainApp` registration. Its toggle only
+registers/unregisters after a user action; a preferences Boolean is not used as
+proof of registration. Pending approval, missing registration and operation
+errors are visible, and status refreshes when returning to Settings. The approval
+button opens Login Items for the user to decide. Local development app paths may
+not support production registration; validate an installed, signed app before
+release. `./scripts/test-login-item.sh` injects failures, external revocation and
+pending approval without registering/unregistering the real app. Adapted from
+wondervip PR #4, with explicit approval-state handling.
