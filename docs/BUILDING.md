@@ -177,3 +177,19 @@ a resolved input explicitly; an unsafe virtual default or saved virtual UID
 produces an actionable error rather than reading the app's own output. Selecting
 another input after failure retries capture. Adapted from wondervip PR #4's
 virtual-input filtering, extended to cover implicit default routing.
+
+## Capture reconnect regression checks
+
+`cd VoiceEnhancerApp && swift run -c release CaptureRecoveryTests` exercises
+coalesced device events, ordered state changes, bounded retry/backoff, exhausted
+retries followed by recovery, preserved selection, Stop during debounce or
+permission, and stale completions. Fixtures deliberately complete cancelled
+operations late; tests use a controllable scheduler, not physical devices.
+
+The app observes input-default and device-inventory changes, retains the saved
+input UID during fallback, and retries failed capture up to three times with
+250/500/1000 ms backoff. Later device changes or the Settings reconnect button
+can recover after exhaustion. Intentionally stopped capture stays stopped.
+This adapts the reconnect direction in wondervip PR #4 without importing its
+menu-bar, login, localization or settings-persistence changes. USB/Bluetooth
+unplug/replug and VoiceOver/light/dark checks remain manual acceptance checks.
