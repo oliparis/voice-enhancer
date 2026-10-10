@@ -106,6 +106,35 @@ These branches and the integration build are pushed to the user's fork. No
 upstream PRs have been opened. Keep R1, P0, R5 and the startup slice separate;
 rebase onto accepted prerequisites when preparing upstream submissions.
 
+## Duplicate capture instances and chopping investigation
+
+- Branch: `fix/single-capture-instance`, based on `fix/capture-startup`,
+  commit `2dd1a81`; integration equivalent: `10a8835`.
+- A user listening test reported regular chopping. Two app instances were
+  running: the earlier manually launched test copy and the user's Xcode copy.
+  Both could produce into the single-producer shared ring. The earlier test
+  copy was closed, preserving the Xcode instance.
+- Startup now rejects another running app with the same bundle identifier
+  before DSP setup or writer-generation publication. A real second-instance
+  launch was observed reporting the intended error and not starting capture.
+- The linked Debug app builds successfully. The driver/shared layout is
+  unchanged; no driver reinstall is required for the guard.
+- A read-only five-second ring-timing probe observed 240,048 produced frames,
+  write batches up to 4,877 frames and a maximum batch gap of 105.5 ms. The
+  source publishes at approximately the intended 48 kHz; native capture is
+  batched despite the requested tap size.
+- A four-second virtual-microphone probe received 192,000 frames with no
+  exact-silence samples after startup warmup. A later run after the usage
+  interruption received 192,000 frames with 237 zero samples; its longest
+  zero run was 101 frames (2.1 ms). These probes count samples without
+  recording or playback. The remaining short gaps mean we must not claim
+  complete end-to-end continuity yet.
+- User confirmation of the single-instance listening retest is pending. The
+  exact listening application/input selection was also requested. Further
+  driver buffering/clock/client timing work should be a separate measured
+  fix if the problem persists; do not infer a sample-rate mismatch from the
+  symptom alone.
+
 ## Local toolchain and test app
 
 Full Xcode is now installed and selected:
