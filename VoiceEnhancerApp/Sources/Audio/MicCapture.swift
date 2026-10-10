@@ -6,6 +6,9 @@ import os
 #if canImport(VoiceEnhancerTapSupport)
 import VoiceEnhancerTapSupport
 #endif
+#if canImport(CaptureLifecycle)
+import CaptureLifecycle
+#endif
 
 /// Microphone capture + routing using `AVAudioEngine`.
 ///
@@ -22,20 +25,20 @@ import VoiceEnhancerTapSupport
 ///     as the voice signal. Stereo mics (rare for voice work) get the left
 ///     channel only. This keeps the DSP path simple and matches how meeting
 ///     apps treat microphones anyway.
-///   * Buffer size is 512 frames at 48 kHz (~10.7 ms). Good balance of
-///     latency vs. CPU efficiency.
+///   * The tap requests 512 native frames; AVAudioEngine may deliver more.
+///     Conversion splits these into bounded blocks for DSP processing.
 ///   * Tap the input at its native rate and channel count. A streaming
 ///     converter supplies 48 kHz mono without opening a hardware output.
 final class MicCapture {
-    /// AVAudioEngine can hand us much larger blocks than the requested tap
-    /// buffer size during route changes and on some built-in devices. Keep
-    /// ample headroom so those blocks don't get dropped before DSP.
+    /// DSP preparation retains its existing capacity; conversion emits blocks
+    /// of at most 1024 frames even when the hardware tap delivers much more.
     private static let maxProcessingFrames = 16_384
 
     private let logger = Logger(subsystem: "tech.aheadly.voice-enhancer", category: "MicCapture")
     private let engineBridge: AudioEngineBridge
     private let ringBridge: RingBufferBridge
     private var avEngine = AVAudioEngine()
+    private let startCoordinator: CaptureStartCoordinator
     var engineConfigurationChangeHandler: (() -> Void)?
 
     /// Optional tap that receives raw pre-DSP audio (48 kHz mono float32).
@@ -57,21 +60,40 @@ final class MicCapture {
     // An installation can throw after mutating the node, so cleanup must
     // attempt removal even when installation did not return successfully.
     private var tapMayBeInstalled = false
+    private var activeNativeFormat: AVAudioFormat?
     private var engineConfigurationObserver: NSObjectProtocol?
 
+    @MainActor
     init(engineBridge: AudioEngineBridge, ringBridge: RingBufferBridge) {
+        self.startCoordinator = CaptureStartCoordinator()
         self.engineBridge = engineBridge
         self.ringBridge = ringBridge
         observeEngineConfiguration()
     }
 
+    @MainActor
     private func observeEngineConfiguration() {
-        self.engineConfigurationObserver = NotificationCenter.default.addObserver(
+        let observedEngine = avEngine
+        let handleChange: @MainActor @Sendable () -> Void = { [weak self, weak observedEngine] in
+            guard let self, let observedEngine, observedEngine === self.avEngine else { return }
+            // Binding a split USB device can post a delayed notification
+            // after a successful start. Rebuilding a healthy graph in
+            // response produces the same notification and a restart loop.
+            let hardware = observedEngine.inputNode.inputFormat(forBus: 0)
+            if observedEngine.isRunning, let active = self.activeNativeFormat,
+               hardware.sampleRate == active.sampleRate,
+               hardware.channelCount == active.channelCount {
+                return
+            }
+            self.logger.notice("Capture format changed or engine stopped; restarting capture")
+            self.engineConfigurationChangeHandler?()
+        }
+        engineConfigurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
-            object: avEngine,
-            queue: nil
-        ) { [weak self] _ in
-            self?.handleEngineConfigurationChange()
+            object: observedEngine,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in handleChange() }
         }
     }
 
@@ -91,8 +113,15 @@ final class MicCapture {
     ///
     /// Throws on permission denial, device binding failure, or engine setup
     /// failure.
+    @MainActor
     func start(deviceID: AudioDeviceID? = nil) async throws {
-        try await requestMicrophonePermission()
+        try await startCoordinator.start(after: requestMicrophonePermission) {
+            try configureCaptureGraph(deviceID: deviceID)
+        }
+    }
+
+    @MainActor
+    private func configureCaptureGraph(deviceID: AudioDeviceID?) throws {
 
         // Rebuild connections for the selected device's current native format.
         stopCaptureGraph(discardGraph: true)
@@ -139,6 +168,7 @@ final class MicCapture {
             if let error = VEInstallInputTapSafely(input, 0, 512, captureFormat, block) {
                 throw MicCaptureError.tapInstallationFailed(error.localizedDescription)
             }
+            activeNativeFormat = nativeFormat
             try avEngine.start()
             logger.notice("Capture started: \(nativeFormat.channelCount, privacy: .public)ch @ \(nativeFormat.sampleRate, privacy: .public) Hz -> 48 kHz, channel 1")
         } catch {
@@ -150,10 +180,13 @@ final class MicCapture {
         }
     }
 
+    @MainActor
     func stop() {
+        startCoordinator.invalidate()
         stopCaptureGraph()
     }
 
+    @MainActor
     private func stopCaptureGraph(discardGraph: Bool = false) {
         var removalFailed = false
         if tapMayBeInstalled {
@@ -164,11 +197,13 @@ final class MicCapture {
             tapMayBeInstalled = false
         }
         avEngine.stop()
+        activeNativeFormat = nil
         if removalFailed || discardGraph {
             discardCaptureGraph()
         }
     }
 
+    @MainActor
     private func discardCaptureGraph() {
         if let engineConfigurationObserver {
             NotificationCenter.default.removeObserver(engineConfigurationObserver)
@@ -191,13 +226,6 @@ final class MicCapture {
         ringBridge.write(samples, numFrames: Int32(count))
     }
 
-    private func handleEngineConfigurationChange() {
-        logger.notice("AVAudioEngine configuration changed; running=\(self.avEngine.isRunning, privacy: .public)")
-        DispatchQueue.main.async { [weak self] in
-            self?.engineConfigurationChangeHandler?()
-        }
-    }
-
     // MARK: - Device binding
 
     /// Bind `avEngine.inputNode` to a specific Core Audio device.
@@ -206,6 +234,7 @@ final class MicCapture {
     /// macOS — you set the underlying AUHAL unit's CurrentDevice property.
     /// Must be called before `avEngine.start()`; later changes require a
     /// full stop/start cycle to pick up.
+    @MainActor
     private func bindInputDevice(_ id: AudioDeviceID) throws {
         let audioUnit = avEngine.inputNode.audioUnit
         guard let unit = audioUnit else {

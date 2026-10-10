@@ -104,6 +104,7 @@ final class AudioViewModel: ObservableObject {
     private var configurationRestartTask: Task<Void, Never>?
     private var configurationStabilityTask: Task<Void, Never>?
     private var desiredRunningState = false
+    private var captureRequest: UInt64 = 0
     private var configurationRestartAttempts = 0
 
     private static let maxConfigurationRestartAttempts = 3
@@ -141,7 +142,7 @@ final class AudioViewModel: ObservableObject {
     // MARK: - Lifecycle
 
     func start() async {
-
+        guard !desiredRunningState else { return }
         desiredRunningState = true
         await startCaptureGraph()
     }
@@ -165,7 +166,8 @@ final class AudioViewModel: ObservableObject {
     }
 
     private func startCaptureGraph() async {
-
+        captureRequest &+= 1
+        let request = captureRequest
         logger.notice("startCaptureGraph called")
         status = .starting
         refreshDeviceList()
@@ -177,6 +179,7 @@ final class AudioViewModel: ObservableObject {
             let deviceID = selectedInputUID.flatMap(AudioDeviceEnumerator.deviceID(forUID:))
 
             try await capture.start(deviceID: deviceID)
+            guard request == captureRequest, desiredRunningState else { return }
 
             startMeterPolling()
             configurationRestartTask?.cancel()
@@ -184,7 +187,7 @@ final class AudioViewModel: ObservableObject {
             status = .running
             scheduleConfigurationRestartBudgetReset()
         } catch {
-
+            guard request == captureRequest else { return }
             desiredRunningState = false
             status = .failed(error.localizedDescription)
             logger.error("startCaptureGraph failed: \(error.localizedDescription, privacy: .public)")
@@ -192,6 +195,7 @@ final class AudioViewModel: ObservableObject {
     }
 
     private func stopCaptureGraph(updateStatus: Bool) {
+        captureRequest &+= 1
         capture.stop()
         stopMeterPolling()
         inputPeak = 0
@@ -221,7 +225,7 @@ final class AudioViewModel: ObservableObject {
         logger.notice("Restarting capture after engine configuration change (attempt \(self.configurationRestartAttempts, privacy: .public))")
         status = .starting
         configurationRestartTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
             await self?.restartAfterConfigurationChange()
         }
     }
@@ -236,7 +240,7 @@ final class AudioViewModel: ObservableObject {
     private func scheduleConfigurationRestartBudgetReset() {
         configurationStabilityTask?.cancel()
         configurationStabilityTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
             await MainActor.run {
                 self?.resetConfigurationRestartBudget()
             }
@@ -277,6 +281,7 @@ final class AudioViewModel: ObservableObject {
     // MARK: - Meters
 
     private func startMeterPolling() {
+        stopMeterPolling()
         // 60 Hz matches typical display refresh. Peak-hold ballistics below
         // need a steady tick so the decay animates during silence — a
         // `.onChange` driven smoother would freeze at the last value when

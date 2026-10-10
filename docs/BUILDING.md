@@ -131,3 +131,14 @@ the full app and virtual-mic routing separately.
 Local validation on 2026-10-10: Xcode 27, USB Audio CODEC input-only device,
 2 channels at 44.1 kHz; 83,790 native frames -> 91,080 converted frames,
 no errors. 82 synthetic checks passed. DSP/driver code is unchanged.
+
+## Capture startup and cancellation
+
+`cd VoiceEnhancerApp && swift run -c release CaptureLifecycleTests` checks
+permission completion after stop, newer starts superseding pending requests,
+task cancellation, and a successful retry after permission failure. Graph
+mutation runs on the main actor with no suspension once permission completes.
+The view model ignores stale completions and makes repeated `start()` calls
+idempotent. Configuration notifications only restart a stopped engine or one
+whose hardware input format changed; delayed notifications from a healthy USB
+binding must not create a restart loop.
