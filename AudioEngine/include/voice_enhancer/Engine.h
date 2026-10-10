@@ -68,9 +68,11 @@ public:
     void process_block(Sample* buffer, FrameCount num_frames) noexcept;
 
 private:
-    // Apply a PresetConfig to all internal stages. Not RT-safe (setters
-    // recompute coefficients). Called from process_block before processing
-    // when a preset swap has been requested.
+    // Bounded coefficient updates; owned by prepare or the audio thread.
+    void apply_pending_controls(unsigned changes) noexcept;
+    enum ControlChange : unsigned { PresetChange = 1, InputGainChange = 2,
+        OutputGainChange = 4, CompChange = 8, DeesserChange = 16, AllChanges = 31 };
+    // Apply a preset before overlaying the pending threshold overrides.
     void apply_preset(const PresetConfig& cfg) noexcept;
 
     SampleRate m_sample_rate;
@@ -88,12 +90,16 @@ private:
     Sample m_output_gain_linear;
     Sample m_preset_output_gain_linear;
 
-    // Preset handshake. `m_pending_preset` is written by set_preset() on any
-    // thread; process_block reads it once per block and, if changed, swaps.
-    // Using atomic<int> instead of atomic<PresetId> because std::atomic on
-    // enums is allowed but uglier to work with.
-    std::atomic<int>  m_pending_preset;
-    int               m_current_preset;
+    // Single control producer publishes bounded scalar updates. Stage state
+    // and linear gain caches are mutated only by prepare/the audio owner.
+    // Whole configuration transactions are a separate future API.
+    std::atomic<int> m_pending_preset;
+    std::atomic<Sample> m_pending_input_gain;
+    std::atomic<Sample> m_pending_output_gain;
+    std::atomic<Sample> m_pending_comp_threshold;
+    std::atomic<Sample> m_pending_deesser_threshold;
+    std::atomic<unsigned> m_control_changes;
+    static_assert(std::atomic<Sample>::is_always_lock_free, "Audio controls must be lock-free");
 
     std::atomic<bool> m_bypass;
 

@@ -100,20 +100,15 @@ targets:
         embed: false
 
     preBuildScripts:
-      - name: Build AudioEngine (if missing)
-        # If libvoice_enhancer.a isn't on disk yet, build it. This keeps the
-        # "clone and hit ⌘R in Xcode" path working for new contributors who
-        # haven't run scripts/build.sh yet.
+      - name: Build AudioEngine
+        # Always run the incremental native build so Xcode cannot link a stale
+        # library after DSP sources change.
         script: |
           set -e
-          LIB="${SRCROOT}/../AudioEngine/build/libvoice_enhancer.a"
-          if [[ ! -f "$LIB" ]]; then
-              echo "note: building AudioEngine (first-run)"
-              cmake -S "${SRCROOT}/../AudioEngine" \
-                    -B "${SRCROOT}/../AudioEngine/build" \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-                    -DCMAKE_OSX_ARCHITECTURES=arm64 >/dev/null
-              cmake --build "${SRCROOT}/../AudioEngine/build" --parallel
-          fi
+          cmake -S "${SRCROOT}/../AudioEngine" \
+                -B "${SRCROOT}/../AudioEngine/build" \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+                -DCMAKE_OSX_ARCHITECTURES=arm64 >/dev/null
+          cmake --build "${SRCROOT}/../AudioEngine/build" --parallel
         basedOnDependencyAnalysis: false
