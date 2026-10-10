@@ -193,3 +193,14 @@ can recover after exhaustion. Intentionally stopped capture stays stopped.
 This adapts the reconnect direction in wondervip PR #4 without importing its
 menu-bar, login, localization or settings-persistence changes. USB/Bluetooth
 unplug/replug and VoiceOver/light/dark checks remain manual acceptance checks.
+
+## Wake recovery
+
+The workspace wake observer requests a three-second delayed restart through the
+same bounded recovery coordinator. Device events can supersede that request;
+there is never a separate wake-owned capture graph. Stop cancels the pending
+restart, and a stopped app ignores wake. Observer teardown removes registration.
+`CaptureRecoveryTests` posts wake notifications to a private notification center
+and checks delay, event coalescing, stopped intent and observer lifetime. A real
+Mac sleep/wake test remains manual; automated tests do not put the Mac to sleep.
+Adapted from wondervip PR #4's delayed wake reconnect behavior.
