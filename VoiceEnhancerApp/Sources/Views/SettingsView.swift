@@ -82,6 +82,8 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Slider(value: $audio.compThresholdDb, in: -40 ... -10, step: 1)
+                            .accessibilityLabel(audio.t(.voiceLeveling))
+                            .accessibilityValue("\(Int(audio.compThresholdDb)) dB")
                         HStack {
                             Text(audio.t(.more))
                                 .font(.caption2).foregroundStyle(.secondary)
@@ -104,6 +106,8 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Slider(value: $audio.deesserThresholdDb, in: -48 ... -16, step: 1)
+                            .accessibilityLabel(audio.t(.sibilanceReduction))
+                            .accessibilityValue("\(Int(audio.deesserThresholdDb)) dB")
                         HStack {
                             Text(audio.t(.more))
                                 .font(.caption2).foregroundStyle(.secondary)
