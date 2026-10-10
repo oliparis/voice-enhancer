@@ -134,3 +134,13 @@ The bundle may have been quarantined. Clear the quarantine flag:
 sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/HAL/VoiceEnhancer.driver
 sudo killall coreaudiod
 ```
+
+## Menu-bar mode
+
+The menu-bar item provides status, Open Voice Enhancer, processing bypass,
+Reconnect microphone and Quit. Closing/minimizing the main window hides the Dock
+entry after the window transition while capture continues; reopening returns the
+window/Dock entry. Only Quit stops audio. Window identity uses its identifier,
+with the existing app title as fallback, so secondary sheets do not own capture.
+Adapted from wondervip PR #4. Manual acceptance: close/reopen/minimize, menu
+status/bypass/reconnect, Quit, light/dark and VoiceOver. Keep one app instance.
