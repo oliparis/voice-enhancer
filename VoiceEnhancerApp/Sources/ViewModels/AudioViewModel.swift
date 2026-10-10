@@ -146,6 +146,14 @@ final class AudioViewModel: ObservableObject {
         await startCaptureGraph()
     }
 
+    /// Menu-bar reconnect action, including a retry after a failed start.
+    func retryCapture() {
+        Task {
+            if desiredRunningState { await restartCaptureIfRunning() }
+            else { await start() }
+        }
+    }
+
     func stop() {
         desiredRunningState = false
         configurationRestartTask?.cancel()
