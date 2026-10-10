@@ -4,6 +4,10 @@ Proposed on 10 October 2026. Companion to [the channel-strip specification](CHAN
 
 The personal fork setup is now recorded in [FORK_WORKFLOW.md](FORK_WORKFLOW.md). Checkout observations and setup recommendations below preserve the context in which this plan was prepared.
 
+Implementation progress and tested branches are recorded separately in
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Upstream submissions
+remain on hold at the user's request.
+
 ## Recommendation
 
 Create a personal GitHub fork of `aheadly-tech/voice-enhancer`. Preserve the current wondervip-based branch as a reference/personal integration branch. Start upstream contributions from a clean, current upstream `main`; selectively extract useful changes with attribution and targeted regression evidence. The Advanced channel-strip work does not require merging all of wondervip's PR first.

@@ -25,8 +25,13 @@ Keep the fork's `main` aligned with accepted upstream changes. Specify `--repo a
 
 ## Continue from here
 
+The first implementation tranche is recorded in
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). R1 and P0 now exist on
+separate upstream-based branches, with a passing combined fork CI run. Keep
+upstream submissions on hold; the next processing slice is P1.
+
 1. Coordinate the proposed PR #4 split with wondervip and aheadly-tech, and discuss whether optional Advanced mode fits upstream. The delivery document contains a draft; it has not been posted.
-2. Start R1, the isolated tap-exception recovery contribution, on a fresh branch/worktree from current `upstream/main`. Include real linked-app validation. The original resampling changes belong in their own reviewed slice.
+2. Finish manual device validation of R1 before an eventual upstream submission. The original resampling changes belong in their own reviewed slice.
 3. Start P1, safe DSP control updates, independently from accepted upstream code. Named presets and startup recall follow through P2–P4 without depending on menu-bar, localization, icons or login changes.
 
 Use one branch per focused PR. Create these branches from `upstream/main` or their explicit accepted prerequisite, never from the planning or reference branches. Keep the planning documents out of an unrelated bug-fix diff. Update this planning branch as decisions change. Use a separate integration branch when combining pending work for personal use.
