@@ -192,6 +192,97 @@ The user confirmed the previous single-instance listening build sounded good.
 The newer R2/R3/R4 build is a separate validation step. Test app instances are
 closed after checking; do not leave a manually launched copy beside Xcode.
 
+## Remaining wondervip features — implemented 11 October 2026
+
+The user explicitly requested all remaining features, including the original
+icon update. They are implemented as separate contributions, not by merging
+wondervip's two omnibus commits. No upstream PRs or public comments were opened.
+
+### P1 prerequisite — audio-owned control updates
+
+- Branch `fix/dsp-control-race`, independent from upstream main, `745e38f`;
+  integration equivalent `f4b1a64`.
+- Existing gain/threshold setters publish lock-free scalars. DSP stage state
+  changes on the audio owner; prepare restores working overrides after factory
+  setup. Same-factory recall deliberately resets tuning. Factory IDs/ABI stay
+  unchanged. Whole grouped configuration transactions remain P2 work.
+- Needed for persistence: baseline prepare discarded edited thresholds, and
+  direct UI threshold/gain setters mutated live DSP state unsafely.
+- Engine tests pass, including 10,000 concurrent control sequences and final
+  waveform comparison. All four factory outputs compared byte-for-byte equal
+  to baseline `19482d3` for generated mixed-tone fixtures (131,072 samples total).
+- Release microbenchmark: 128 frames 5.71 us/block vs baseline 6.11; 512 frames
+  20.49 vs 20.72; roughly 0.2% real time. These noisy single-run numbers do not
+  establish a speedup or measure whole-app CPU. Formal allocation/TSan profiling
+  remains a release-readiness check. Xcode's incremental engine build now runs
+  every build to avoid linking stale native code.
+
+### Menu-bar and Dock behavior
+
+- Branch `feat/menu-bar`, independent from upstream main; commits `9c069d3`,
+  `f4d0782`, `d49969b`. Standalone linked app build passed.
+- Menu status, Open, bypass, reconnect and Quit; close/minimize hides the Dock
+  entry while capture continues; reopening returns it. Capture errors badge
+  the Dock entry. Window identifier/title fallback avoids secondary sheets
+  owning capture. Adapted from wondervip's AppDelegate/MenuBarExtra direction.
+- Integration uses its existing tested reconnect entry point, rather than
+  duplicating the standalone branch's minimal retry implementation.
+
+### Current-control persistence and Custom
+
+- Branch `feat/settings-persistence`, based only on P1, `0d1fb1c`; integration
+  equivalent `6ac1f8e`.
+- Versioned working document remembers factory/Custom, its factory base, the
+  two exposed thresholds, and global processing bypass. Restored before audio.
+- Threshold edits promote Custom; factory recall resets edits but keeps the
+  last Custom available. Preview uses the same retained factory base. Custom
+  is never passed to the factory DSP ABI. Recall preserves global bypass.
+- Debounced writes and quit flush; prior valid state and rejected bytes kept.
+  Legacy wondervip keys preserved. Legacy Custom has no recoverable base:
+  use Natural with a visible, localized recovery notice rather than guessing.
+- 11 isolated round-trip/migration/corruption/version checks pass. This v1 stores
+  today's editable controls, not the future named presets or Advanced chain.
+  P2/P3 must explicitly migrate it to complete snapshots; P4 adds named presets.
+
+### Launch at login
+
+- Branch `feat/launch-at-login`, independent from upstream main, `a0b22a7`;
+  integration equivalent `b4af32c`.
+- Settings controller reflects actual SMAppService status, including pending
+  approval/errors/external revocation. A user action registers/unregisters;
+  startup reads status only. Nine service-state checks pass using an injected
+  fake; tests did not enable or disable the real login item.
+- Validate registration/approval on an installed signed app before release.
+
+### Localization
+
+- Branch `feat/localization`, stacked on clean reliability/P1/menu/persistence/
+  login prerequisites; feature commits `045d524` and `354c575`.
+- English, Simplified Chinese, Hindi, Spanish, Arabic, French, Bengali,
+  Portuguese, Russian and Japanese; persisted selection and Arabic RTL.
+- Retains wondervip's language data, fills missing login strings in seven
+  original tables, and adds translated recovery/approval UI. System error
+  details retain macOS's supplied language. Presets are actual keyboard-
+  accessible buttons; settings/sliders have localized accessibility labels.
+- 1,404 coverage/placeholder/formatting/fallback/RTL checks pass. These checks
+  do not establish translation quality, native-language or VoiceOver review.
+
+### Icon assets
+
+- Branch `feat/wondervip-icon`, independent from upstream main, `dbfb1bc`;
+  integration equivalent `8ee2bbe`.
+- Existing wondervip PR #4 PNG assets are copied without pixel changes. App icon
+  updates are separate from functional contributions. Menu status uses SF Symbols.
+
+All feature branches are pushed to the user's fork. The integration branch
+combines them for testing; do not submit its entire diff upstream. Dependent
+branches must be replayed onto accepted prerequisites before individual PRs.
+The standalone menu and current-control persistence app builds passed, as did
+the localized and combined linked builds. Native UI automation has repeatedly
+failed with a closed-pipe error, so menu reopen/Quit, login approval, language
+layout, light/dark screenshots and real VoiceOver validation remain manual.
+Do not claim these release checks complete solely from compilation/tests.
+
 ## Local toolchain and test app
 
 Full Xcode is now installed and selected:
@@ -212,16 +303,12 @@ checks for R5; the DSP algorithm and driver code have not changed.
 
 ## Next implementation steps
 
-1. Keep all upstream submissions on hold as requested by the user.
-2. Begin P1 (`fix/dsp-control-race`) from current upstream `main`: safe updates
-   for the existing DSP setters, with focused concurrency/final-value regression
-   tests and CPU evidence. Do not bring in the planning or integration branches.
-3. Complete manual hardware/UI acceptance for R2/R3/R4 as recorded above.
-   Menu-bar/Dock behavior, optional login integration and localization remain
-   separate contributions from wondervip's original PR.
-4. P2–P4 deliver complete snapshots, startup recall and named user presets
-   before the larger Advanced UI.
-
-Before eventually raising R1, use the accepted P0 CI base or explicitly state
-the linked-build prerequisite. The integration run proves the combined source,
-but does not make the original upstream CI runner current.
+1. Keep upstream submissions on hold as requested. Prepare focused diffs after
+   each prerequisite is accepted; coordinate wondervip attribution/ownership.
+2. Finish manual UI/hardware/release acceptance for the reliability and remaining
+   original-PR features. Login registration is opt-in; test a signed installed
+   app. Do not leave a manually launched test copy alongside Xcode.
+3. P1 is implemented. P2 now adds full coherent engine snapshots/readback; P3
+   migrates the current v1 working document; P4 adds named user presets before
+   the larger Advanced UI. Current Custom is not a named-preset library.
+4. Continue accurate metering, bypass and editor work per the delivery plan.

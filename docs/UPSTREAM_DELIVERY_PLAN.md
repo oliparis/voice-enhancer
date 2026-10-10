@@ -102,7 +102,7 @@ Wake behavior is separately implemented on `fix/wake-recovery`.
 ## What to do with the rest of #4
 
 - **Menu bar and Dock behavior:** optional standalone PR, with lifecycle/reopen/status/quit checks. It is not a channel-strip dependency. Preserve upstream's existing background audio behavior.
-- **Settings and Custom persistence:** prefer the complete-state work P3/P4 below to importing a temporary two-threshold Custom design and replacing it immediately. If wondervip independently lands persistence first, adapt the migration to its accepted format. Device UID persistence is already upstream.
+- **Settings and Custom persistence:** the user subsequently requested all remaining original-PR features. `feat/settings-persistence` now provides versioned current-control persistence with a retained factory base. P2/P3 must migrate that document into full chain snapshots, and P4 adds named presets; do not treat this as completion of the Advanced persistence scope. If wondervip independently lands persistence first, adapt the migration to its accepted format. Device UID persistence is already upstream.
 - **Launch at login:** independent optional PR with login registration/status/error checks; not required for presets or Advanced mode.
 - **Localization:** independent work with translation review and RTL/accessibility checks; do not make the new processor controls depend on wondervip's unmerged localization framework. Support whichever localization mechanism upstream has accepted by then.
 - **Icon changes:** leave out of the functional series; propose separately if wanted.
