@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import AppKit
 import CoreAudio
 import AudioToolbox
 import os
@@ -116,6 +117,15 @@ final class MicCapture {
     @MainActor
     func start(deviceID: AudioDeviceID? = nil) async throws {
         try await startCoordinator.start(after: requestMicrophonePermission) {
+            // Xcode and manually opened builds can run alongside each other.
+            // The shared ring supports one producer, so reject a second app
+            // before preparing DSP or publishing a new writer generation.
+            if let identifier = Bundle.main.bundleIdentifier,
+               NSRunningApplication.runningApplications(withBundleIdentifier: identifier).contains(where: {
+                   !$0.isTerminated && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+               }) {
+                throw MicCaptureError.anotherInstanceRunning
+            }
             try configureCaptureGraph(deviceID: deviceID)
         }
     }
@@ -280,6 +290,7 @@ final class MicCapture {
 }
 
 enum MicCaptureError: LocalizedError {
+    case anotherInstanceRunning
     case microphonePermissionDenied
     case deviceBindingFailed(code: Int)
     case tapInstallationFailed(String)
@@ -287,6 +298,8 @@ enum MicCaptureError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .anotherInstanceRunning:
+            return "Another copy of Voice Enhancer is running. Quit the other copy, then reopen this app to start microphone capture."
         case .microphonePermissionDenied:
             return "Microphone permission was not granted. Enable it in System Settings → Privacy & Security → Microphone."
         case .deviceBindingFailed(let code):
