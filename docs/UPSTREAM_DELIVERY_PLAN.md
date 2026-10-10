@@ -74,6 +74,11 @@ These are useful early contributions, not blanket prerequisites for the DSP trac
 
 ### R3 — Debounce and recover from device reconfiguration
 
+**Implementation update (2026-10-10):** keep the initial startup/cancellation and
+healthy-notification fixes as a smaller prerequisite PR (`fix/capture-startup`,
+currently stacked on R5). It has deterministic async lifecycle tests and local
+USB validation. Broader reconnect/backoff/device-removal behavior remains in R3.
+
 **Base:** R1 for recoverable tap failures; R2 if the chosen fallback selection requires it. **Scope:** bounded reconnect retries, cancellation, selected-device retention and overlapping event handling. Extend the existing recovery logic rather than replacing unrelated view-model/UI behavior. A manual retry action can live in existing Settings; it need not depend on a menu bar.
 
 **Evidence:** deterministic scheduler/fake-capture tests for event bursts, late completions, cancellation on Stop, failed retry then success and exhausted retries. Manual USB/Bluetooth switching verifies recovery and routing. No launch-at-login, localization, icons or new persistence format.

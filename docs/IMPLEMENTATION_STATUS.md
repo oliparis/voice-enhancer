@@ -60,48 +60,69 @@ builds at `5779a7c`.
 
 ## R5 — Native microphone format conversion
 
-The user reported a tap format mismatch while running the first CI app with a
-saved USB Audio CODEC input. This confirms that R1 reports the exception but
-does not make a hardware input accept a different format. R5 was brought
-forward to unblock real-device testing.
+- Branch: `fix/native-input-format`, based on R1.
+- Current commit: `c11e0ea`; integration equivalent: `8295824`.
+- Initial mixer implementation (`a98a62f` / `b887734`) passed 213 offline
+  checks and CI, but failed live with `-10875`. It is superseded: binding the
+  USB input-only device also binds AVAudioEngine's shared I/O unit, leaving
+  zero output channels. A muted playback mixer still requires an output.
+- Capture now taps native-rate/channel-count input directly and converts
+  channel 1 through a persistent AudioConverter to 48 kHz mono. It opens no
+  output route. Fixed 128-frame input staging retains phase/filter history;
+  preallocated output blocks contain at most 1024 frames. Oversized taps are
+  split without truncation; 48 kHz bypasses resampling.
+- Removed callback logging/dispatch. Converter and buffers are created/warmed
+  before capture. Application callback code does not allocate or lock.
 
-- Branch: `fix/native-input-format`, based on the R1 prerequisite.
-- Commit: `a98a62f`; combined integration commit: `b887734`.
-- [Source branch](https://github.com/oliparis/voice-enhancer/tree/fix/native-input-format).
-- Connect the microphone using its hardware-native format to an AVAudioMixerNode.
-  Configure its output to 48 kHz float32 with the same channels; take channel 1
-  for the mono DSP/ring contract. This preserves the first-channel policy.
-- Tap the conversion mixer, not the hardware input. Conversion state and
-  resampling live in AVAudioEngine's render graph, not a per-buffer application
-  resampler. Mute the downstream main mixer to avoid speaker feedback while
-  leaving the captured tap signal live.
-- Rebuild the capture graph on each start to negotiate the selected device's
-  current format; handle graph-configuration exceptions through the native boundary.
+Validation on 2026-10-10:
 
-Local validation: 213 checks passed, including the original exception checks,
-offline native-rate conversion at 8/16/44.1/48/96 kHz in mono/stereo, equivalent
-regular/irregular render blocks, first-channel level and stereo separation,
-duration, high-frequency rejection when downsampling, and nonzero captured audio
-with silent downstream playback. Swift capture code passes native-interface
-type-checking. These checks use generated signals, not the user's physical mic.
+- 82 native checks passed: tap exception handling, 8/16/44.1/48/96/192 kHz,
+  1–32768-frame input chunks, waveform continuity and level, output duration,
+  30-second 44.1 kHz timing, anti-alias filtering and mutable-output isolation.
+- An opt-in `TapSupportTests --live-input <AudioDeviceID>` test now exercises
+  physical input. It counts frames without recording or playback. USB Audio
+  CODEC input, stereo 44.1 kHz: 83,790 native -> 91,080 converted frames, no
+  errors. It does not exercise the virtual driver or subjective audio quality.
+- Local linked Debug Xcode build and Release SwiftPM build passed.
 
-[Replacement CI build](https://github.com/oliparis/voice-enhancer/actions/runs/38088866748)
-passed Linux DSP tests, macOS DSP/driver, the native conversion checks, SwiftPM
-and the linked Xcode app. The replacement test copy is prepared at
-`VoiceEnhancerApp/build/native-format-test/Voice Enhancer.app` with a verified
-local ad-hoc signature; quit the previous copy before opening it. Physical USB
-input and Bluetooth route switching remain manual checks.
+## Capture startup reliability (focused R3 prerequisite)
 
-## Local toolchain
+- Branch: `fix/capture-startup`, based on current R5, commit `6d54591`.
+- Integration equivalent: `b99011e` on `integration/initial-contributions`.
+- Main-actor graph mutation; generation checks invalidate pending permission
+  requests after stop/newer start. Repeated view-model starts are idempotent,
+  stale completions cannot overwrite current state, and cancelled recovery
+  tasks do not resume anyway.
+- Ignore delayed configuration notifications when the engine is still running
+  and its native input format is unchanged. The USB device otherwise triggered
+  a repeated successful-start/rebuild loop until the retry budget ran out.
+- `CaptureLifecycleTests` passed: stop during permission, superseding device
+  request, task cancellation, and retry after permission failure. Added to CI.
+- The complete app was observed Running with live input/output levels using
+  the physical USB microphone. Broader unplug/replug, Bluetooth, sleep/wake,
+  driver routing and listening validation remain separate checks.
 
-At implementation time, this Mac has Command Line Tools but no full Xcode or
-XcodeGen. Native helper tests run successfully. Full SwiftPM app compilation
-requires Xcode's asset compiler; direct whole-app type-checking also needs its
-SwiftUI macro plug-ins. The fork CI run supplies those full-build checks.
+These branches and the integration build are pushed to the user's fork. No
+upstream PRs have been opened. Keep R1, P0, R5 and the startup slice separate;
+rebase onto accepted prerequisites when preparing upstream submissions.
 
-For local shipping-app validation, install/open Xcode to finish its setup,
-select `/Applications/Xcode.app/Contents/Developer` with `xcode-select`, and
-install XcodeGen. Device validation must use the linked app, not the stub.
+## Local toolchain and test app
+
+Full Xcode is now installed and selected:
+`/Applications/Xcode.app/Contents/Developer`, Xcode 27.0 (27A266a). XcodeGen,
+native tests, SwiftPM and linked Xcode builds run locally.
+
+Use `integration/initial-contributions` for combined local testing. Generate
+with `cd VoiceEnhancerApp && xcodegen generate`, then build/run in Xcode, or
+use `VoiceEnhancerApp/build/Build/Products/Debug/Voice Enhancer.app` (locally
+ad-hoc signed). The earlier `manual-test` and `native-format-test` copies and
+`/Applications/Voice Enhancer.app` are older builds. Launch the explicit path
+and keep one app instance running. The installed driver is unchanged.
+
+The Debug app's whole-process CPU sample includes SwiftUI/meter rendering and
+is not a converter benchmark. Formal real-time allocation/CPU profiling,
+additional hardware routes and subjective listening remain upstream-readiness
+checks for R5; the DSP algorithm and driver code have not changed.
 
 ## Next implementation steps
 
@@ -110,7 +131,8 @@ install XcodeGen. Device validation must use the linked app, not the stub.
    for the existing DSP setters, with focused concurrency/final-value regression
    tests and CPU evidence. Do not bring in the planning or integration branches.
 3. R2 (excluding virtual input) is another independently reviewable reliability
-   slice; R3/R4/R5 follow their documented dependencies and device validation.
+   slice; the remaining R3/R4 work follows its documented dependencies. R5 and the
+   startup prerequisite now have local USB validation as recorded above.
 4. P2–P4 deliver complete snapshots, startup recall and named user presets
    before the larger Advanced UI.
 
