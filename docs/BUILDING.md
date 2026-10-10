@@ -95,6 +95,20 @@ Device-specific format/reconnect recovery still requires separate fixes and
 manual hardware validation. This guard is adapted from wondervip's
 [PR #4](https://github.com/aheadly-tech/voice-enhancer/pull/4).
 
+## Native microphone formats
+
+Microphone capture connects the hardware input at its native rate/channel
+count to a conversion mixer. The mixer outputs 48 kHz float32 with the original
+channel count; the DSP receives only channel 1. The main mixer is muted, so
+capture is not monitored through the speakers. A direct tap on the input node
+cannot request a different hardware format.
+
+`TapSupportTests` also renders the production graph without microphone access
+at 8/16/44.1/48/96 kHz in mono and stereo. It checks block-boundary continuity,
+first-channel level, separate stereo channels, output duration, downsampling
+rejection and live captured audio while the playback path is muted. Physical
+input-device and Bluetooth route changes still need a linked-app manual check.
+
 ## Install / uninstall
 
 ```sh
