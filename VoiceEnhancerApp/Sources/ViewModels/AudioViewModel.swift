@@ -3,6 +3,7 @@ import SwiftUI
 import Combine
 import CoreAudio
 import os
+import AppKit
 #if canImport(CaptureLifecycle)
 import CaptureLifecycle
 #endif
@@ -63,7 +64,9 @@ final class AudioViewModel: ObservableObject {
     }
 
     /// Human-readable status string shown in the toolbar.
-    @Published private(set) var status: Status = .idle
+    @Published private(set) var status: Status = .idle {
+        didSet { NSApp.dockTile.badgeLabel = status.isError ? "!" : nil }
+    }
 
     /// Whether the shared-memory ring to the HAL driver is open. False when
     /// the driver bundle isn't installed (or the OS denied the mapping) —
