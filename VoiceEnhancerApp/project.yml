@@ -47,6 +47,8 @@ targets:
           - "Audio/TapSupport"
       - path: Sources/Audio/TapSupport/AVAudioTapInstaller.m
         compilerFlags: "-fobjc-arc -fobjc-arc-exceptions"
+      - path: Sources/Audio/TapSupport/CaptureGraph.m
+        compilerFlags: "-fobjc-arc -fobjc-arc-exceptions"
 
     info:
       path: Sources/Resources/Info.plist

@@ -12,5 +12,6 @@
 
 #include "engine_c_api.h"
 #import "Audio/TapSupport/include/AVAudioTapInstaller.h"
+#import "Audio/TapSupport/include/CaptureGraph.h"
 
 #endif /* VoiceEnhancer_Bridging_Header_h */

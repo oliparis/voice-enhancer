@@ -24,10 +24,9 @@ import VoiceEnhancerTapSupport
 ///     apps treat microphones anyway.
 ///   * Buffer size is 512 frames at 48 kHz (~10.7 ms). Good balance of
 ///     latency vs. CPU efficiency.
-///   * Format conversion is handled by AVAudioEngine itself — we install
-///     the tap with the ring's target format (48 kHz mono float32) and the
-///     engine inserts an RT-safe converter in its audio graph when the
-///     input device's native format differs.
+///   * Connect the input in its native format to a mixer that converts to
+///     48 kHz float32. Tap the mixer and copy its first channel to the mono
+///     DSP buffer. A tap on the input node cannot request a different format.
 final class MicCapture {
     /// AVAudioEngine can hand us much larger blocks than the requested tap
     /// buffer size during route changes and on some built-in devices. Keep
@@ -38,6 +37,7 @@ final class MicCapture {
     private let engineBridge: AudioEngineBridge
     private let ringBridge: RingBufferBridge
     private var avEngine = AVAudioEngine()
+    private var captureMixer = AVAudioMixerNode()
     var engineConfigurationChangeHandler: (() -> Void)?
 
     /// Optional tap that receives raw pre-DSP audio (48 kHz mono float32).
@@ -46,8 +46,8 @@ final class MicCapture {
     var rawAudioTap: ((UnsafePointer<Float>, Int) -> Void)?
 
     /// The target format the ring expects. Fixed: 48 kHz, mono, float32.
-    /// The tap is installed with this format so AVAudioEngine handles any
-    /// sample rate or channel conversion in its internal graph (RT-safe).
+    /// The mixer handles rate conversion. Channel 0 is copied to this mono
+    /// contract after conversion, preserving the first-channel policy.
     private let ringFormat: AVAudioFormat = {
         AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -103,7 +103,8 @@ final class MicCapture {
     func start(deviceID: AudioDeviceID? = nil) async throws {
         try await requestMicrophonePermission()
 
-        stop()
+        // Rebuild connections for the selected device's current native format.
+        stopCaptureGraph(discardGraph: true)
 
         if let id = deviceID {
             try bindInputDevice(id)
@@ -118,21 +119,32 @@ final class MicCapture {
         // Mark a new writer session so the driver resyncs its read head.
         ringBridge.bumpGeneration()
 
-        // Install a tap with the ring's target format. When the input
-        // device's native format differs (e.g. 44.1 kHz stereo USB mic),
-        // AVAudioEngine inserts an internal format converter that runs
-        // inside its managed audio graph — RT-safe, no allocations in our
-        // callback. The callback always receives 48 kHz mono float32.
         let input = avEngine.inputNode
         let block: AVAudioNodeTapBlock = { [weak self] buffer, _ in
             self?.handleInputBuffer(buffer)
         }
-        tapMayBeInstalled = true
         do {
-            if let error = VEInstallInputTapSafely(input, 0, 512, ringFormat, block) {
+            // The input scope describes the hardware rate/channel count.
+            let nativeFormat = input.inputFormat(forBus: 0)
+            guard nativeFormat.sampleRate.isFinite, nativeFormat.sampleRate > 0,
+                  nativeFormat.channelCount > 0,
+                  let captureFormat = AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32,
+                    sampleRate: ringFormat.sampleRate,
+                    channels: nativeFormat.channelCount,
+                    interleaved: false
+                  ) else {
+                throw MicCaptureError.inputConfigurationFailed("The microphone has no valid input format.")
+            }
+            if let error = VEConfigureCaptureGraphSafely(avEngine, input, captureMixer, nativeFormat, captureFormat) {
+                throw MicCaptureError.inputConfigurationFailed(error.localizedDescription)
+            }
+            tapMayBeInstalled = true
+            if let error = VEInstallInputTapSafely(captureMixer, 0, 512, captureFormat, block) {
                 throw MicCaptureError.tapInstallationFailed(error.localizedDescription)
             }
             try avEngine.start()
+            logger.notice("Capture started: \(nativeFormat.channelCount, privacy: .public)ch @ \(nativeFormat.sampleRate, privacy: .public) Hz -> 48 kHz, channel 1")
         } catch {
             // Preserve the original setup error, even if removal also fails.
             // A fresh graph prevents partially installed or duplicate taps
@@ -149,7 +161,7 @@ final class MicCapture {
     private func stopCaptureGraph(discardGraph: Bool = false) {
         var removalFailed = false
         if tapMayBeInstalled {
-            if let error = VERemoveInputTapSafely(avEngine.inputNode, 0) {
+            if let error = VERemoveInputTapSafely(captureMixer, 0) {
                 logger.warning("Audio tap removal failed: \(error.localizedDescription, privacy: .public)")
                 removalFailed = true
             }
@@ -167,6 +179,7 @@ final class MicCapture {
             NotificationCenter.default.removeObserver(engineConfigurationObserver)
         }
         avEngine = AVAudioEngine()
+        captureMixer = AVAudioMixerNode()
         observeEngineConfiguration()
     }
 
@@ -186,13 +199,13 @@ final class MicCapture {
         if !hasLoggedFirstInputBuffer {
             hasLoggedFirstInputBuffer = true
             DispatchQueue.main.async { [weak self, frameCount] in
-                self?.logger.notice("First input buffer: \(frameCount, privacy: .public) frames @ 48 kHz mono")
+                self?.logger.notice("First converted input buffer: \(frameCount, privacy: .public) frames @ 48 kHz")
             }
         }
 
         // Copy channel 0 into the processing scratch buffer.
-        // The tap is installed with ringFormat so the buffer is always
-        // 48 kHz mono float32 — no conversion needed.
+        // The conversion mixer supplies 48 kHz float32 and preserves the
+        // input channels. Take only channel 0; conversion has already run.
         processingBuffer.withUnsafeMutableBufferPointer { dst in
             guard let base = dst.baseAddress else { return }
             base.update(from: channelData[0], count: frameCount)
@@ -265,6 +278,7 @@ enum MicCaptureError: LocalizedError {
     case microphonePermissionDenied
     case deviceBindingFailed(code: Int)
     case tapInstallationFailed(String)
+    case inputConfigurationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -274,6 +288,8 @@ enum MicCaptureError: LocalizedError {
             return "Could not bind to the selected input device (code \(code))."
         case .tapInstallationFailed(let message):
             return "Could not install the microphone tap: \(message)"
+        case .inputConfigurationFailed(let message):
+            return "Could not configure microphone capture: \(message)"
         }
     }
 }
