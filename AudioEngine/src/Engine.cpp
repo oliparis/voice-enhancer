@@ -12,7 +12,11 @@ Engine::Engine() noexcept
     , m_output_gain_linear(1.0f)
     , m_preset_output_gain_linear(1.0f)
     , m_pending_preset(static_cast<int>(PresetId::Natural))
-    , m_current_preset(-1)   // forces apply on first process
+    , m_pending_input_gain(1.0f)
+    , m_pending_output_gain(1.0f)
+    , m_pending_comp_threshold(get_preset(PresetId::Natural).comp_threshold_db)
+    , m_pending_deesser_threshold(get_preset(PresetId::Natural).deesser_threshold_db)
+    , m_control_changes(AllChanges)
     , m_bypass(false)
     , m_input_peak(0.0f)
     , m_output_peak(0.0f)
@@ -30,10 +34,9 @@ void Engine::prepare(SampleRate sr, FrameCount max_block_size) noexcept {
     m_deesser.prepare(sr);
     m_limiter.prepare(sr);
 
-    // Apply the currently-selected preset synchronously during prepare so
-    // the first audio callback has a valid chain.
-    apply_preset(get_preset(static_cast<PresetId>(m_pending_preset.load())));
-    m_current_preset = m_pending_preset.load();
+    // Consume before reading scalars so a concurrently published newer update
+    // remains dirty for the next block. Restore overrides after factory setup.
+    apply_pending_controls(m_control_changes.exchange(0, std::memory_order_acquire) | AllChanges);
 
     reset();
 }
@@ -47,7 +50,11 @@ void Engine::reset() noexcept {
 }
 
 void Engine::set_preset(PresetId id) noexcept {
+    const auto& preset = get_preset(id);
     m_pending_preset.store(static_cast<int>(id), std::memory_order_relaxed);
+    m_pending_comp_threshold.store(preset.comp_threshold_db, std::memory_order_relaxed);
+    m_pending_deesser_threshold.store(preset.deesser_threshold_db, std::memory_order_relaxed);
+    m_control_changes.fetch_or(PresetChange | CompChange | DeesserChange, std::memory_order_release);
 }
 
 void Engine::set_bypass(bool bypass) noexcept {
@@ -55,19 +62,33 @@ void Engine::set_bypass(bool bypass) noexcept {
 }
 
 void Engine::set_input_gain_db(Sample db) noexcept {
-    m_input_gain_linear = db_to_linear(db);
+    m_pending_input_gain.store(db_to_linear(db), std::memory_order_relaxed);
+    m_control_changes.fetch_or(InputGainChange, std::memory_order_release);
 }
 
 void Engine::set_output_gain_db(Sample db) noexcept {
-    m_output_gain_linear = db_to_linear(db);
+    m_pending_output_gain.store(db_to_linear(db), std::memory_order_relaxed);
+    m_control_changes.fetch_or(OutputGainChange, std::memory_order_release);
 }
 
 void Engine::set_comp_threshold_db(Sample db) noexcept {
-    m_compressor.set_threshold_db(db);
+    m_pending_comp_threshold.store(db, std::memory_order_relaxed);
+    m_control_changes.fetch_or(CompChange, std::memory_order_release);
 }
 
 void Engine::set_deesser_threshold_db(Sample db) noexcept {
-    m_deesser.set_threshold_db(db);
+    m_pending_deesser_threshold.store(db, std::memory_order_relaxed);
+    m_control_changes.fetch_or(DeesserChange, std::memory_order_release);
+}
+
+void Engine::apply_pending_controls(unsigned changes) noexcept {
+    if (changes & PresetChange) {
+        apply_preset(get_preset(static_cast<PresetId>(m_pending_preset.load(std::memory_order_relaxed))));
+    }
+    if (changes & CompChange) m_compressor.set_threshold_db(m_pending_comp_threshold.load(std::memory_order_relaxed));
+    if (changes & DeesserChange) m_deesser.set_threshold_db(m_pending_deesser_threshold.load(std::memory_order_relaxed));
+    if (changes & InputGainChange) m_input_gain_linear = m_pending_input_gain.load(std::memory_order_relaxed);
+    if (changes & OutputGainChange) m_output_gain_linear = m_pending_output_gain.load(std::memory_order_relaxed);
 }
 
 void Engine::apply_preset(const PresetConfig& cfg) noexcept {
@@ -96,16 +117,7 @@ void Engine::apply_preset(const PresetConfig& cfg) noexcept {
 }
 
 void Engine::process_block(Sample* buffer, FrameCount num_frames) noexcept {
-    // 1. Handle any pending preset swap. This is the only place we mutate
-    //    coefficients on the audio thread — it happens at most once per block
-    //    and only when the UI actually changed something. Parameter setters
-    //    inside apply_preset do a bounded number of floating-point ops plus
-    //    memcpy of biquad coefficients. No allocations.
-    const int pending = m_pending_preset.load(std::memory_order_relaxed);
-    if (pending != m_current_preset) {
-        apply_preset(get_preset(static_cast<PresetId>(pending)));
-        m_current_preset = pending;
-    }
+    apply_pending_controls(m_control_changes.exchange(0, std::memory_order_acquire));
 
     // 2. Input meter + input gain.
     Sample input_peak = 0.0f;

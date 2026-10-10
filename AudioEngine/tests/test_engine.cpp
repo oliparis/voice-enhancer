@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <thread>
+#include <chrono>
 
 namespace {
 
@@ -173,6 +175,79 @@ void test_preset_names_are_valid() {
     }
 }
 
+std::vector<float> render_controls(voice_enhancer::Engine& engine) {
+    auto signal = make_sine(250.0, 48000.0, 48000, 0.12f);
+    auto high = make_sine(8000.0, 48000.0, 48000, 0.08f);
+    for (std::size_t i = 0; i < signal.size(); ++i) signal[i] += high[i];
+    for (int i = 0; i < 48000; i += 512) engine.process_block(signal.data() + i, std::min(512, 48000 - i));
+    return signal;
+}
+
+void test_controls_survive_prepare_and_recall() {
+    g_current_test = "controls_survive_prepare_and_recall";
+    voice_enhancer::Engine restored, live;
+    for (auto* engine : {&restored, &live}) {
+        engine->set_preset(voice_enhancer::PresetId::Broadcast);
+        engine->set_comp_threshold_db(-35.0f);
+        engine->set_deesser_threshold_db(-42.0f);
+    }
+    restored.prepare(48000.0, 512);
+    live.prepare(48000.0, 512);
+    // Reprepare simulates device reconnect: it must keep working overrides.
+    restored.prepare(48000.0, 512);
+    const auto a = render_controls(restored), b = render_controls(live);
+    for (std::size_t i = 0; i < a.size(); ++i) EXPECT_NEAR(a[i], b[i], 1e-6);
+    voice_enhancer::Engine factory;
+    factory.set_preset(voice_enhancer::PresetId::Broadcast);
+    factory.prepare(48000.0, 512);
+    auto original = render_controls(factory);
+    EXPECT_TRUE(std::fabs(rms(a) - rms(original)) > 0.001f);
+    restored.set_preset(voice_enhancer::PresetId::Broadcast); // same-preset recall resets edits
+    float silence[512] = {};
+    restored.process_block(silence, 512);
+    restored.reset(); factory.reset();
+    const auto recalled = render_controls(restored), reference = render_controls(factory);
+    for (std::size_t i = 0; i < recalled.size(); ++i) EXPECT_NEAR(recalled[i], reference[i], 1e-6);
+}
+
+void test_concurrent_controls_deliver_final_value() {
+    g_current_test = "concurrent_controls_deliver_final_value";
+    voice_enhancer::Engine engine;
+    engine.prepare(48000.0, 512);
+    std::atomic<bool> finished{false};
+    std::thread producer([&] {
+        for (int i = 0; i < 10000; ++i) {
+            engine.set_preset(static_cast<voice_enhancer::PresetId>(i % 4));
+            engine.set_input_gain_db(static_cast<float>(i % 12 - 6));
+            engine.set_output_gain_db(static_cast<float>(i % 8 - 4));
+            engine.set_comp_threshold_db(-30.0f);
+            engine.set_deesser_threshold_db(-38.0f);
+        }
+        engine.set_preset(voice_enhancer::PresetId::Warm);
+        engine.set_input_gain_db(-6.0f);
+        engine.set_output_gain_db(-3.0f);
+        engine.set_comp_threshold_db(-31.0f);
+        engine.set_deesser_threshold_db(-39.0f);
+        finished.store(true, std::memory_order_release);
+    });
+    do {
+        auto input = make_sine(1000.0, 48000.0, 512, 0.1f);
+        engine.process_block(input.data(), 512);
+        for (float value : input) EXPECT_TRUE(std::isfinite(value));
+    } while (!finished.load(std::memory_order_acquire));
+    producer.join();
+    float silence[512] = {};
+    engine.process_block(silence, 512);
+    engine.reset();
+    voice_enhancer::Engine reference;
+    reference.set_preset(voice_enhancer::PresetId::Warm);
+    reference.set_input_gain_db(-6.0f); reference.set_output_gain_db(-3.0f);
+    reference.set_comp_threshold_db(-31.0f); reference.set_deesser_threshold_db(-39.0f);
+    reference.prepare(48000.0, 512);
+    const auto actual = render_controls(engine), expected = render_controls(reference);
+    for (std::size_t i = 0; i < actual.size(); ++i) EXPECT_NEAR(actual[i], expected[i], 1e-6);
+}
+
 } // anonymous namespace
 
 int main() {
@@ -183,6 +258,8 @@ int main() {
     test_engine_bypass_is_transparent();
     test_engine_limiter_holds_ceiling();
     test_preset_names_are_valid();
+    test_controls_survive_prepare_and_recall();
+    test_concurrent_controls_deliver_final_value();
 
     if (g_failures == 0) {
         std::printf("All tests passed.\n");
