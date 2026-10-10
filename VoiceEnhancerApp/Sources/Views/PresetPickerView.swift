@@ -24,17 +24,28 @@ struct PresetPickerView: View {
             SectionHeader(title: "Preset")
 
             LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(Preset.allCases) { preset in
+                ForEach(Preset.allCases.filter { $0.isFactoryPreset }) { preset in
                     PresetCardView(
                         preset: preset,
                         isSelected: audio.selectedPreset == preset
                     )
                     .onTapGesture {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            audio.selectedPreset = preset
+                            audio.recallPreset(preset)
                         }
                     }
                 }
+            }
+            Button { audio.recallPreset(.custom) } label: {
+                Label(Preset.custom.name, systemImage: Preset.custom.systemImage)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(audio.selectedPreset == .custom ? .accentColor : .secondary)
+            .accessibilityAddTraits(audio.selectedPreset == .custom ? .isSelected : [])
+            .help(Preset.custom.blurb)
+            if let notice = audio.settingsRecoveryNotice {
+                Text(notice).font(.caption).foregroundStyle(.secondary)
             }
         }
     }

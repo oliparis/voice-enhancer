@@ -2,7 +2,7 @@ import Foundation
 
 /// Voice-processing preset — the user's main choice in the UI.
 ///
-/// Values here must stay in sync with `ve_preset_t` in the C ABI header and
+/// Factory values 0–3 must stay in sync with `ve_preset_t` in the C ABI header and
 /// with `PresetId` in the C++ engine. When adding a preset:
 ///   1. Add the case in C++ (``AudioEngine/include/voice_enhancer/Preset.h``)
 ///   2. Add it to ``ve_preset_t`` in the C ABI
@@ -13,6 +13,9 @@ enum Preset: Int, CaseIterable, Identifiable {
     case broadcast = 1
     case clarity   = 2
     case warm      = 3
+    case custom    = 4
+
+    var isFactoryPreset: Bool { self != .custom }
 
     var id: Int { rawValue }
 
@@ -23,6 +26,7 @@ enum Preset: Int, CaseIterable, Identifiable {
         case .broadcast: return "Broadcast"
         case .clarity:   return "Clarity"
         case .warm:      return "Warm"
+        case .custom:    return "Custom"
         }
     }
 
@@ -34,6 +38,7 @@ enum Preset: Int, CaseIterable, Identifiable {
         case .broadcast: return "Radio DJ voice. Bold and clear."
         case .clarity:   return "Cuts through. Great for quiet mics."
         case .warm:      return "Softens harsh mics. Adds body."
+        case .custom:    return "Your saved tuning."
         }
     }
 
@@ -44,6 +49,7 @@ enum Preset: Int, CaseIterable, Identifiable {
         case .broadcast: return "dot.radiowaves.left.and.right"
         case .clarity:   return "sparkles"
         case .warm:      return "flame"
+        case .custom:    return "slider.horizontal.3"
         }
     }
 
@@ -54,6 +60,7 @@ enum Preset: Int, CaseIterable, Identifiable {
         case .broadcast: return -22
         case .clarity:   return -20
         case .warm:      return -18
+        case .custom:    return -18
         }
     }
 
@@ -64,6 +71,7 @@ enum Preset: Int, CaseIterable, Identifiable {
         case .broadcast: return -26
         case .clarity:   return -24
         case .warm:      return -26
+        case .custom:    return -24
         }
     }
 }
