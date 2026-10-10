@@ -58,6 +58,40 @@ builds at `5779a7c`.
 - This branch is a validation build, not the head of a combined upstream PR.
   The clean R1 and P0 branches retain their separate diffs.
 
+## R5 — Native microphone format conversion
+
+The user reported a tap format mismatch while running the first CI app with a
+saved USB Audio CODEC input. This confirms that R1 reports the exception but
+does not make a hardware input accept a different format. R5 was brought
+forward to unblock real-device testing.
+
+- Branch: `fix/native-input-format`, based on the R1 prerequisite.
+- Commit: `a98a62f`; combined integration commit: `b887734`.
+- [Source branch](https://github.com/oliparis/voice-enhancer/tree/fix/native-input-format).
+- Connect the microphone using its hardware-native format to an AVAudioMixerNode.
+  Configure its output to 48 kHz float32 with the same channels; take channel 1
+  for the mono DSP/ring contract. This preserves the first-channel policy.
+- Tap the conversion mixer, not the hardware input. Conversion state and
+  resampling live in AVAudioEngine's render graph, not a per-buffer application
+  resampler. Mute the downstream main mixer to avoid speaker feedback while
+  leaving the captured tap signal live.
+- Rebuild the capture graph on each start to negotiate the selected device's
+  current format; handle graph-configuration exceptions through the native boundary.
+
+Local validation: 213 checks passed, including the original exception checks,
+offline native-rate conversion at 8/16/44.1/48/96 kHz in mono/stereo, equivalent
+regular/irregular render blocks, first-channel level and stereo separation,
+duration, high-frequency rejection when downsampling, and nonzero captured audio
+with silent downstream playback. Swift capture code passes native-interface
+type-checking. These checks use generated signals, not the user's physical mic.
+
+[Replacement CI build](https://github.com/oliparis/voice-enhancer/actions/runs/38088866748)
+passed Linux DSP tests, macOS DSP/driver, the native conversion checks, SwiftPM
+and the linked Xcode app. The replacement test copy is prepared at
+`VoiceEnhancerApp/build/native-format-test/Voice Enhancer.app` with a verified
+local ad-hoc signature; quit the previous copy before opening it. Physical USB
+input and Bluetooth route switching remain manual checks.
+
 ## Local toolchain
 
 At implementation time, this Mac has Command Line Tools but no full Xcode or
