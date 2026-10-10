@@ -134,3 +134,10 @@ The bundle may have been quarantined. Clear the quarantine flag:
 sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/HAL/VoiceEnhancer.driver
 sudo killall coreaudiod
 ```
+
+## App icon provenance
+
+The app icon PNGs are the existing assets from wondervip PR #4 (`e8c93ec`),
+retained without pixel edits. Keep this asset-only contribution separate from
+functional PRs. Verify appearance at Dock/menu/application icon sizes before
+release; the menu-bar status item uses SF Symbols rather than the app PNG.
