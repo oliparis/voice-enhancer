@@ -1,11 +1,25 @@
 import Foundation
 
+enum SettingsRecoveryNotice {
+    case savedInvalid, legacyInvalid, legacyCustomBase
+
+    func text(language: AppLanguage) -> String {
+        let key: LocalizedStrings.Key
+        switch self {
+        case .savedInvalid: key = .savedSettingsInvalid
+        case .legacyInvalid: key = .legacySettingsInvalid
+        case .legacyCustomBase: key = .legacyCustomRecovered
+        }
+        return LocalizedStrings.text(key, language: language)
+    }
+}
+
 /// Versioned single-document persistence. Keep a prior valid document and retain
 /// rejected bytes/legacy keys so recovery does not destroy future migration data.
 final class SettingsStore {
     static let key = "tech.aheadly.voice-enhancer.workingSettings.v1"
     private let defaults: UserDefaults
-    private(set) var recoveryNotice: String?
+    private(set) var recoveryNotice: SettingsRecoveryNotice?
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
@@ -13,7 +27,7 @@ final class SettingsStore {
         if let data = defaults.data(forKey: Self.key) {
             if let document = decode(data) { return document }
             defaults.set(data, forKey: Self.key + ".rejected")
-            recoveryNotice = "Saved tuning could not be restored. A previous valid state or Natural was loaded."
+            recoveryNotice = .savedInvalid
             if let backup = defaults.data(forKey: Self.key + ".backup"), let document = decode(backup) { return document }
             return SettingsDocument()
         }
@@ -34,11 +48,11 @@ final class SettingsStore {
             working.deesserThresholdDb != preset.defaultDeesserThresholdDb
         working.baseWasRecovered = preset == .custom
         if !working.isValid {
-            recoveryNotice = "Legacy tuning was invalid. Natural was loaded."
+            recoveryNotice = .legacyInvalid
             return SettingsDocument()
         }
         if working.baseWasRecovered {
-            recoveryNotice = "Legacy Custom tuning had no saved factory base. It was restored using Natural."
+            recoveryNotice = .legacyCustomBase
         }
         return SettingsDocument(working: working, custom: working.isCustom ? working : nil)
     }

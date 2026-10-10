@@ -116,6 +116,9 @@ jobs:
       - name: Run login item checks
         run: ./scripts/test-login-item.sh
 
+      - name: Run localization checks
+        run: ./scripts/test-localization.sh
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

@@ -65,17 +65,18 @@ private struct HeaderView: View {
                     .padding(6)
             }
             .buttonStyle(.borderless)
-            .help("Settings")
+            .help(audio.t(.settings))
 
             Toggle("", isOn: $audio.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
-                .help(audio.isEnabled ? "Enhancement on" : "Enhancement bypassed")
+                .help(audio.isEnabled ? audio.t(.enhancementOn) : audio.t(.enhancementBypassed))
         }
     }
 }
 
 private struct StatusPill: View {
+    @EnvironmentObject private var audio: AudioViewModel
     let status: AudioViewModel.Status
 
     var body: some View {
@@ -83,7 +84,7 @@ private struct StatusPill: View {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
-            Text(status.displayText)
+            Text(audio.statusText(status))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -118,7 +119,7 @@ private struct DriverStatusFooter: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .font(.system(size: 11))
-                    Text("Virtual driver not installed. Run scripts/install.sh to route audio to other apps.")
+                    Text(audio.t(.virtualDriverMissingFooter))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)

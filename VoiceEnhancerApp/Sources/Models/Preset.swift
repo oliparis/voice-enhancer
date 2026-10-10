@@ -20,25 +20,29 @@ enum Preset: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
 
     /// Short display name shown on the preset card.
-    var name: String {
+    var name: String { name(language: .english) }
+
+    func name(language: AppLanguage) -> String {
         switch self {
-        case .natural:   return "Natural"
-        case .broadcast: return "Broadcast"
-        case .clarity:   return "Clarity"
-        case .warm:      return "Warm"
-        case .custom:    return "Custom"
+        case .natural:   return LocalizedStrings.text(.naturalName, language: language)
+        case .broadcast: return LocalizedStrings.text(.broadcastName, language: language)
+        case .clarity:   return LocalizedStrings.text(.clarityName, language: language)
+        case .warm:      return LocalizedStrings.text(.warmName, language: language)
+        case .custom:    return LocalizedStrings.text(.customName, language: language)
         }
     }
 
     /// One-line description of what the preset does. Kept deliberately short
     /// so it fits comfortably under the name on a preset card.
-    var blurb: String {
+    var blurb: String { blurb(language: .english) }
+
+    func blurb(language: AppLanguage) -> String {
         switch self {
-        case .natural:   return "Gentle cleanup. Most transparent."
-        case .broadcast: return "Radio DJ voice. Bold and clear."
-        case .clarity:   return "Cuts through. Great for quiet mics."
-        case .warm:      return "Softens harsh mics. Adds body."
-        case .custom:    return "Your saved tuning."
+        case .natural:   return LocalizedStrings.text(.naturalBlurb, language: language)
+        case .broadcast: return LocalizedStrings.text(.broadcastBlurb, language: language)
+        case .clarity:   return LocalizedStrings.text(.clarityBlurb, language: language)
+        case .warm:      return LocalizedStrings.text(.warmBlurb, language: language)
+        case .custom:    return LocalizedStrings.text(.customBlurb, language: language)
         }
     }
 
