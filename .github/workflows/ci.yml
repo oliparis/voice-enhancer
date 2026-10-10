@@ -112,6 +112,9 @@ jobs:
       - name: Run settings persistence checks
         run: ./scripts/test-settings.sh
 
+      - name: Run login item checks
+        run: ./scripts/test-login-item.sh
+
       - name: Upload driver artifact
         uses: actions/upload-artifact@v4
         with:

@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 /// Modal settings sheet — secondary configuration.
 ///
@@ -9,6 +10,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var audio: AudioViewModel
+    @StateObject private var login = LoginItemController()
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Local mirror of the selection so the picker binds cleanly even when
     /// the selected device isn't in the list (e.g. unplugged). The "System
@@ -138,6 +141,26 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            GroupBox("Startup") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Launch at login", isOn: Binding(
+                        get: { login.requested }, set: { login.setRequested($0) }))
+                    Text("Start Voice Enhancer automatically when you sign in to this Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if login.status == .requiresApproval {
+                        Text("Approval is required in System Settings → General → Login Items.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                    } else if login.status == .notFound {
+                        Text("macOS could not find this app for login registration. Use an installed app bundle.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let error = login.errorMessage {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             GroupBox("About") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Voice Enhancer")
@@ -160,12 +183,16 @@ struct SettingsView: View {
         .padding(20)
         .onAppear {
             audio.refreshDeviceList()
+            login.refresh()
             pickerSelection = audio.selectedInputUID
         }
         .onChange(of: pickerSelection) { new in
             if new != audio.selectedInputUID {
                 audio.selectedInputUID = new
             }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { login.refresh() }
         }
         .onDisappear {
             audio.stopPreviewPlayback()
