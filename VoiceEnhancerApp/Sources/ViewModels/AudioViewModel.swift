@@ -28,10 +28,8 @@ final class AudioViewModel: ObservableObject {
     /// resets the tuning sliders to the preset's defaults.
     @Published var selectedPreset: Preset = .natural {
         didSet {
-            guard oldValue != selectedPreset else { return }
-            bridge.setPreset(selectedPreset)
-            compThresholdDb = selectedPreset.defaultCompThresholdDb
-            deesserThresholdDb = selectedPreset.defaultDeesserThresholdDb
+            guard !isApplyingSettings else { return }
+            recallPreset(selectedPreset)
         }
     }
 
@@ -40,6 +38,7 @@ final class AudioViewModel: ObservableObject {
         didSet {
             bridge.setCompThresholdDb(compThresholdDb)
             preview.setCompThresholdDb(compThresholdDb)
+            tuningDidChange()
         }
     }
 
@@ -48,6 +47,7 @@ final class AudioViewModel: ObservableObject {
         didSet {
             bridge.setDeesserThresholdDb(deesserThresholdDb)
             preview.setDeesserThresholdDb(deesserThresholdDb)
+            tuningDidChange()
         }
     }
 
@@ -58,6 +58,7 @@ final class AudioViewModel: ObservableObject {
     @Published var isEnabled: Bool = true {
         didSet {
             bridge.setBypass(!isEnabled)
+            if !isApplyingSettings { scheduleSettingsSave() }
         }
     }
 
@@ -99,6 +100,14 @@ final class AudioViewModel: ObservableObject {
 
     // MARK: - Internals
 
+    private let settingsStore = SettingsStore()
+    private var factoryBase: Preset = .natural
+    private var customSettings: WorkingSettings?
+    private var baseWasRecovered = false
+    private var isApplyingSettings = false
+    private var settingsSaveTask: Task<Void, Never>?
+    @Published private(set) var settingsRecoveryNotice: String?
+
     private let bridge: AudioEngineBridge
     private let ring: RingBufferBridge
     private let capture: MicCapture
@@ -130,6 +139,10 @@ final class AudioViewModel: ObservableObject {
         self.inputDevices = AudioDeviceEnumerator.listInputDevices()
         self.driverAvailable = AudioDeviceEnumerator.hasVoiceEnhancerDriver() || ring.isOpen
         self.selectedInputUID = UserDefaults.standard.string(forKey: Self.inputUIDDefaultsKey)
+        let restored = settingsStore.load()
+        self.customSettings = restored.custom
+        self.settingsRecoveryNotice = settingsStore.recoveryNotice
+        applyWorkingSettings(restored.working)
         self.deviceMonitor = AudioDeviceMonitor { [weak self] in
             guard let self else { return }
             self.refreshDeviceList()
@@ -155,7 +168,7 @@ final class AudioViewModel: ObservableObject {
 
     func start() async { await recovery.start() }
 
-    func stop() { recovery.stop() }
+    func stop() { flushSettings(); recovery.stop() }
 
     func retryCapture() { Task { await recovery.retry() } }
 
@@ -187,13 +200,65 @@ final class AudioViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Working tuning
+
+    func recallPreset(_ preset: Preset) {
+        var settings = preset == .custom
+            ? (customSettings ?? currentWorkingSettings()) : WorkingSettings.factory(preset)
+        settings.isCustom = preset == .custom
+        settings.isEnabled = isEnabled // bypass is a separate global preference
+        applyWorkingSettings(settings)
+        scheduleSettingsSave()
+    }
+
+    private func applyWorkingSettings(_ settings: WorkingSettings) {
+        isApplyingSettings = true
+        factoryBase = Preset(rawValue: settings.basePreset) ?? .natural
+        baseWasRecovered = settings.baseWasRecovered
+        bridge.setPreset(factoryBase)
+        preview.setPreset(factoryBase)
+        selectedPreset = settings.isCustom ? .custom : factoryBase
+        compThresholdDb = settings.compThresholdDb
+        deesserThresholdDb = settings.deesserThresholdDb
+        isEnabled = settings.isEnabled
+        isApplyingSettings = false
+    }
+
+    private func currentWorkingSettings() -> WorkingSettings {
+        WorkingSettings(basePreset: factoryBase.rawValue, isCustom: selectedPreset == .custom,
+            compThresholdDb: compThresholdDb, deesserThresholdDb: deesserThresholdDb, isEnabled: isEnabled, baseWasRecovered: baseWasRecovered)
+    }
+
+    private func tuningDidChange() {
+        guard !isApplyingSettings else { return }
+        isApplyingSettings = true
+        selectedPreset = .custom
+        isApplyingSettings = false
+        customSettings = currentWorkingSettings()
+        scheduleSettingsSave()
+    }
+
+    private func scheduleSettingsSave() {
+        settingsSaveTask?.cancel()
+        settingsSaveTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 200_000_000) } catch { return }
+            self?.flushSettings()
+        }
+    }
+
+    func flushSettings() {
+        settingsSaveTask?.cancel()
+        settingsSaveTask = nil
+        settingsStore.save(SettingsDocument(working: currentWorkingSettings(), custom: customSettings))
+    }
+
     // MARK: - Voice Preview
 
     func startPreviewRecording() { preview.startRecording() }
 
     func startPreviewPlayback() {
         preview.startPlayback(
-            preset: selectedPreset,
+            preset: factoryBase,
             compThresholdDb: compThresholdDb,
             deesserThresholdDb: deesserThresholdDb,
             bypass: !isEnabled
