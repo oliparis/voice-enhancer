@@ -80,6 +80,21 @@ Two paths:
 
    This compiles with a stub engine — the Swift code checks for the `VoiceEnhancerEngine` module and silently falls back to a pass-through if it's absent. Useful for catching SwiftUI regressions in CI without a C++ toolchain configured.
 
+## Audio tap regression checks
+
+Run `cd VoiceEnhancerApp && swift run -c release TapSupportTests` to exercise
+tap installation/removal exception handling without microphone permission or
+physical audio devices. Both SwiftPM and the shipping app link the same native
+helper. The runner covers successful operations, partial installation cleanup,
+duplicate taps, missing exception reasons, removal failures and a later success.
+
+The native helper uses Objective-C because Swift error handling cannot catch an
+`NSException` raised by AVAudioEngine. Failed capture graphs are discarded before
+a subsequent start; the sample format and DSP processing path are unchanged.
+Device-specific format/reconnect recovery still requires separate fixes and
+manual hardware validation. This guard is adapted from wondervip's
+[PR #4](https://github.com/aheadly-tech/voice-enhancer/pull/4).
+
 ## Install / uninstall
 
 ```sh
