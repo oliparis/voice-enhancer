@@ -79,7 +79,10 @@ final class AudioViewModel: ObservableObject {
             guard oldValue != selectedInputUID else { return }
             UserDefaults.standard.set(selectedInputUID, forKey: Self.inputUIDDefaultsKey)
             // Hot-swap: restart the capture graph with the new device.
-            Task { await restartCaptureIfRunning() }
+            Task {
+                if case .failed = status { await start() }
+                else { await restartCaptureIfRunning() }
+            }
         }
     }
 
@@ -173,12 +176,10 @@ final class AudioViewModel: ObservableObject {
         refreshDeviceList()
 
         do {
-            // Resolve the persisted UID to a live device ID. If the device
-            // went away, fall through to the system default rather than
-            // failing the start.
-            let deviceID = selectedInputUID.flatMap(AudioDeviceEnumerator.deviceID(forUID:))
-
-            try await capture.start(deviceID: deviceID)
+            // Resolve a missing saved device to a safe system default, and
+            // never let the engine select our own virtual microphone.
+            let device = try AudioDeviceEnumerator.captureInput(preferredUID: selectedInputUID)
+            try await capture.start(deviceID: device.deviceID)
             guard request == captureRequest, desiredRunningState else { return }
 
             startMeterPolling()
