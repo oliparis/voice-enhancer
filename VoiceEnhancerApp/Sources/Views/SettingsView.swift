@@ -45,13 +45,18 @@ struct SettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
 
-                    Button(audio.t(.reconnectMicrophone)) { audio.retryCapture() }
-                        .help(audio.t(.retryCaptureHelp))
-
                     Text(audio.t(.inputDeviceDescription))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        audio.retryCapture()
+                    } label: {
+                        Label(audio.t(.reconnectMicrophone), systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .controlSize(.small)
+                    .help(audio.t(.retryCaptureHelp))
                 }
                 .padding(6)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -124,6 +129,59 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            GroupBox(audio.t(.language)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker(audio.t(.language), selection: $audio.appLanguage) {
+                        ForEach(AppLanguage.allCases) { language in
+                            Text("\(language.nativeName) - \(language.displayName)")
+                                .tag(language)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+
+                    Text(audio.t(.languageDescription))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            GroupBox(audio.t(.launchAtLogin)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: Binding(
+                        get: { login.requested }, set: { login.setRequested($0) })) {
+                        Text(audio.t(.launchAtLogin))
+                    }
+
+                    Text(audio.t(.launchAtLoginDescription))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if login.status == .requiresApproval {
+                        Text(audio.t(.loginApprovalRequired))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(audio.t(.openLoginItems)) { SMAppService.openSystemSettingsLoginItems() }
+                    } else if login.status == .notFound {
+                        Text(audio.t(.loginAppMissing))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let error = login.errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             GroupBox(audio.t(.virtualDriver)) {
                 HStack(spacing: 10) {
                     Circle()
@@ -145,35 +203,9 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            GroupBox(audio.t(.startup)) {
-                VStack(alignment: .leading, spacing: 8) {
-                Picker(audio.t(.language), selection: $audio.appLanguage) {
-                    ForEach(AppLanguage.allCases) { language in
-                        Text(language.nativeName).tag(language)
-                    }
-                }
-                Text(audio.t(.languageDescription)).font(.caption).foregroundStyle(.secondary)
-                    Toggle(audio.t(.launchAtLogin), isOn: Binding(
-                        get: { login.requested }, set: { login.setRequested($0) }))
-                    Text(audio.t(.launchAtLoginDescription))
-                        .font(.caption).foregroundStyle(.secondary)
-                    if login.status == .requiresApproval {
-                        Text(audio.t(.loginApprovalRequired))
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button(audio.t(.openLoginItems)) { SMAppService.openSystemSettingsLoginItems() }
-                    } else if login.status == .notFound {
-                        Text(audio.t(.loginAppMissing))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let error = login.errorMessage {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-                }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
-            }
-
             GroupBox(audio.t(.about)) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Voice Enhancer")
+                    Text(audio.t(.appName))
                         .font(.system(.body, design: .rounded).bold())
                     Text(audio.t(.openSourceLicensed))
                         .foregroundStyle(.secondary)

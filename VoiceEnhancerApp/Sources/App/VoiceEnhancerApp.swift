@@ -132,7 +132,7 @@ private struct MenuBarControls: View {
             audio.isEnabled.toggle()
         }
 
-        Button(audio.t(.reconnectMicrophone)) {
+        Button(audio.t(.restartAudioEngine)) {
             audio.retryCapture()
         }
 

@@ -236,12 +236,23 @@ preventing a stale static library after DSP edits.
 ## Menu-bar mode
 
 The menu-bar item provides status, Open Voice Enhancer, processing bypass,
-Reconnect microphone and Quit. Closing/minimizing the main window hides the Dock
+Restart Audio Engine and Quit. Closing/minimizing the main window hides the Dock
 entry after the window transition while capture continues; reopening returns the
 window/Dock entry. Only Quit stops audio. Window identity uses its identifier,
 with the existing app title as fallback, so secondary sheets do not own capture.
 Adapted from wondervip PR #4. Manual acceptance: close/reopen/minimize, menu
 status/bypass/reconnect, Quit, light/dark and VoiceOver. Keep one app instance.
+
+The main window restores the original wondervip PR #4 visual layout: five
+compact preset cards, the selected preset description and tuning summary.
+Settings follows the original group order: Input Device, Voice Tuning, Language,
+Launch at Login, Virtual Driver and About. Preset controls remain keyboard
+accessible buttons; login controls retain actual registration state and
+conditional approval, missing-registration and error messages. Matched offscreen
+main-view snapshots in light and dark appearance are pixel-identical for the
+captured cards, summary and meters. Offscreen snapshots omit the full window and
+native Settings controls; live-window, Settings and VoiceOver checks remain
+manual acceptance checks.
 
 ## Working tuning and Custom recall
 

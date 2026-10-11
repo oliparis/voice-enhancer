@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// Intentionally flat — this is not a "dashboard". The hierarchy is:
 ///   1. Header: app name + master on/off toggle + status pill.
-///   2. Preset picker: four cards. This is the primary control.
+///   2. Preset picker: five cards. This is the primary control.
 ///   3. Meters: compact, live, informative but not flashy.
 ///   4. Footer: tiny status line for driver health — invisible when things
 ///      are working, informative when they aren't.
@@ -19,21 +19,28 @@ struct ContentView: View {
     @State private var showingSettings = false
 
     var body: some View {
-        VStack(spacing: 24) {
-            HeaderView(showingSettings: $showingSettings)
+        ZStack(alignment: .topLeading) {
+            WindowBackground()
 
-            PresetPickerView()
+            VStack(spacing: 24) {
+                HeaderView(showingSettings: $showingSettings)
 
-            MetersView()
+                PresetPickerView()
 
-            Spacer(minLength: 0)
+                MetersView()
 
-            DriverStatusFooter()
+                Spacer(minLength: 0)
+
+                DriverStatusFooter()
+            }
+            .padding(.top, 52)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(24)
-        .background(WindowBackground())
         .sheet(isPresented: $showingSettings) {
             SettingsView()
+                .environment(\.layoutDirection, audio.appLanguage.layoutDirection)
                 .frame(minWidth: 460, minHeight: 520)
         }
     }
@@ -48,7 +55,7 @@ private struct HeaderView: View {
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Voice Enhancer")
+                Text(audio.t(.appName))
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                 StatusPill(status: audio.status)
             }
@@ -156,7 +163,9 @@ private struct WindowBackground: View {
     }
 }
 
+#if DEBUG
 #Preview {
     ContentView()
         .environmentObject(AudioViewModel())
 }
+#endif
