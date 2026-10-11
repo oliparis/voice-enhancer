@@ -298,6 +298,9 @@ System/Core Audio error details retain the language supplied by macOS.
 ## App icon provenance
 
 The app icon PNGs are the existing assets from wondervip PR #4 (`e8c93ec`),
-retained without pixel edits. Keep this asset-only contribution separate from
+retained without pixel edits. The unassigned 64-pixel image and invalid Mac
+1024-point duplicate were removed; valid 64-pixel and 1024-pixel representations
+remain as 32-point @2x and 512-point @2x assets, respectively.
+Keep this asset-only contribution separate from
 functional PRs. Verify appearance at Dock/menu/application icon sizes before
 release; the menu-bar status item uses SF Symbols rather than the app PNG.
