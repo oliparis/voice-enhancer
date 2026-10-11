@@ -24,10 +24,10 @@ import VoiceEnhancerTapSupport
 ///     apps treat microphones anyway.
 ///   * Buffer size is 512 frames at 48 kHz (~10.7 ms). Good balance of
 ///     latency vs. CPU efficiency.
-///   * Format conversion is handled by AVAudioEngine itself — we install
-///     the tap with the ring's target format (48 kHz mono float32) and the
-///     engine inserts an RT-safe converter in its audio graph when the
-///     input device's native format differs.
+///   * The tap retains the ring's fixed format (48 kHz mono float32).
+///     AVAudioEngine can reject incompatible input formats; the native
+///     helper turns tap exceptions into recoverable setup errors.
+///     Native-format capture and conversion require a separate change.
 final class MicCapture {
     /// AVAudioEngine can hand us much larger blocks than the requested tap
     /// buffer size during route changes and on some built-in devices. Keep
@@ -46,8 +46,8 @@ final class MicCapture {
     var rawAudioTap: ((UnsafePointer<Float>, Int) -> Void)?
 
     /// The target format the ring expects. Fixed: 48 kHz, mono, float32.
-    /// The tap is installed with this format so AVAudioEngine handles any
-    /// sample rate or channel conversion in its internal graph (RT-safe).
+    /// The tap requests this format; incompatible input formats may be
+    /// rejected with a recoverable tap installation error.
     private let ringFormat: AVAudioFormat = {
         AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -118,11 +118,10 @@ final class MicCapture {
         // Mark a new writer session so the driver resyncs its read head.
         ringBridge.bumpGeneration()
 
-        // Install a tap with the ring's target format. When the input
-        // device's native format differs (e.g. 44.1 kHz stereo USB mic),
-        // AVAudioEngine inserts an internal format converter that runs
-        // inside its managed audio graph — RT-safe, no allocations in our
-        // callback. The callback always receives 48 kHz mono float32.
+        // Retain the fixed 48 kHz mono float32 tap. AVAudioEngine may reject
+        // incompatible formats (e.g. a 44.1 kHz USB mic); the native helper
+        // returns a recoverable error instead of letting the exception abort
+        // the app. Native-format capture and conversion are separate work.
         let input = avEngine.inputNode
         let block: AVAudioNodeTapBlock = { [weak self] buffer, _ in
             self?.handleInputBuffer(buffer)
