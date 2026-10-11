@@ -40,9 +40,9 @@ struct PresetPickerView: View {
                 }
             }
 
-            // Reserve wrapped text space so switching presets keeps the meters in place.
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    // Keep symbol bounds consistent when switching presets.
                     Image(systemName: audio.selectedPreset.systemImage)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
@@ -56,7 +56,7 @@ struct PresetPickerView: View {
                     Text(audio.selectedPreset.blurb(language: audio.appLanguage))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2, reservesSpace: true)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Spacer(minLength: 0)
@@ -65,7 +65,7 @@ struct PresetPickerView: View {
                 Text(tuningSummary)
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(2, reservesSpace: true)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 10)
