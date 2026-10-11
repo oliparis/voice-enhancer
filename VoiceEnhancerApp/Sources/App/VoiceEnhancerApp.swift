@@ -1,11 +1,19 @@
 import SwiftUI
 import AppKit
+import AVFoundation
+#if canImport(CaptureLifecycle)
+import CaptureLifecycle
+#endif
 
 /// Menu-bar window lifecycle adapted from wondervip PR #4.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        if CapturePermissionRequest.needsForeground(for: AVCaptureDevice.authorizationStatus(for: .audio)) {
+            ApplicationPresentation.showMainWindow()
+        } else {
+            NSApp.setActivationPolicy(.accessory)
+        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(windowBecameVisible),
@@ -39,7 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func windowWillClose(_ notification: Notification) {
         guard isMainAppWindow(notification.object as? NSWindow) else { return }
         DispatchQueue.main.async {
-            if !Self.hasVisibleMainAppWindow() {
+            if !Self.hasVisibleMainAppWindow(),
+               !CapturePermissionRequest.needsForeground(for: AVCaptureDevice.authorizationStatus(for: .audio)) {
                 NSApp.setActivationPolicy(.accessory)
             }
         }

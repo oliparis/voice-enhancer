@@ -270,22 +270,19 @@ final class MicCapture {
     /// continuation. This avoids blocking the MainActor thread (which
     /// DispatchSemaphore.wait would do) and correctly suspends the Swift
     /// concurrency task until TCC responds.
+    @MainActor
     private func requestMicrophonePermission() async throws {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return
-        case .denied, .restricted:
-            throw MicCaptureError.microphonePermissionDenied
-        case .notDetermined:
-            let granted = await withCheckedContinuation { continuation in
+        let granted = await CapturePermissionRequest.request(
+            authorizationStatus: AVCaptureDevice.authorizationStatus(for: .audio),
+            presentApplication: ApplicationPresentation.showMainWindow
+        ) {
+            await withCheckedContinuation { continuation in
                 AVCaptureDevice.requestAccess(for: .audio) { ok in
                     continuation.resume(returning: ok)
                 }
             }
-            if !granted { throw MicCaptureError.microphonePermissionDenied }
-        @unknown default:
-            throw MicCaptureError.microphonePermissionDenied
         }
+        if !granted { throw MicCaptureError.microphonePermissionDenied }
     }
 }
 

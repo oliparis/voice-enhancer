@@ -158,6 +158,15 @@ idempotent. Configuration notifications only restart a stopped engine or one
 whose hardware input format changed; delayed notifications from a healthy USB
 binding must not create a restart loop.
 
+On first launch with microphone approval not yet determined, the app uses
+regular foreground presentation. It reveals and activates the main window
+immediately before requesting OS permission and keeps its Dock entry while
+approval is undecided. Authorized starts and reconnects retain their existing
+behavior; denial surfaces a capture error without starting the capture graph.
+`CaptureLifecycleTests` uses mocked permission statuses, grant/denial results and
+request ordering; it does not request microphone access or reset actual
+permissions. Manual acceptance of the first-launch TCC prompt remains pending.
+
 ## One capture instance
 
 Keep one Voice Enhancer app running when testing. Xcode can launch its own copy
