@@ -69,13 +69,24 @@ Output: `VirtualDriver/build/VoiceEnhancer.driver` (a bundle directory).
 Two paths:
 
 1. **Shipping build (Xcode project required).**
-   Generate the project with `cd VoiceEnhancerApp && xcodegen generate`,
-   then open it and build the `VoiceEnhancer` scheme. The project is derived
+   Install the build tools with `brew install cmake xcodegen`, then generate
+   the project with `(cd VoiceEnhancerApp && xcodegen generate)`.
+   Open it and build the `VoiceEnhancer` scheme. The project is derived
    from `VoiceEnhancerApp/project.yml` and is not checked into version control.
+   Regenerate after pulling or changing branches when new Swift files or
+   `project.yml` changes are present. Close and reopen the project if Xcode
+   still shows stale diagnostics; clean the build folder only if needed.
    CI builds this linked app without signing as well as checking SwiftPM;
    the SwiftPM stub alone does not validate the shipping C/Objective-C bridge.
 
-2. **Compile check (SwiftPM).** Works everywhere.
+   If the build fails, expand the **Build AudioEngine** log and find the first
+   actual error. GUI Xcode may omit Homebrew from `PATH`, causing
+   `cmake: command not found` even when CMake is installed. The build script
+   checks `command -v cmake`, then `/opt/homebrew/bin/cmake` and
+   `/usr/local/bin/cmake`; regenerate the project to pick up that script.
+   Investigate any remaining Swift diagnostics separately after this step runs.
+
+2. **Compile check (SwiftPM).** macOS only.
 
     ```sh
     cd VoiceEnhancerApp

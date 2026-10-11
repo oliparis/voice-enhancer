@@ -105,10 +105,23 @@ targets:
         # library after DSP sources change.
         script: |
           set -e
-          cmake -S "${SRCROOT}/../AudioEngine" \
+          CMAKE_BIN="$(command -v cmake || true)"
+          if [ -z "$CMAKE_BIN" ]; then
+              for candidate in /opt/homebrew/bin/cmake /usr/local/bin/cmake; do
+                  if [ -x "$candidate" ]; then
+                      CMAKE_BIN="$candidate"
+                      break
+                  fi
+              done
+          fi
+          if [ -z "$CMAKE_BIN" ]; then
+              echo "error: CMake is required to build AudioEngine. Install it with 'brew install cmake' or add it to Xcode's PATH." >&2
+              exit 1
+          fi
+          "$CMAKE_BIN" -S "${SRCROOT}/../AudioEngine" \
                 -B "${SRCROOT}/../AudioEngine/build" \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
                 -DCMAKE_OSX_ARCHITECTURES=arm64 >/dev/null
-          cmake --build "${SRCROOT}/../AudioEngine/build" --parallel
+          "$CMAKE_BIN" --build "${SRCROOT}/../AudioEngine/build" --parallel
         basedOnDependencyAnalysis: false

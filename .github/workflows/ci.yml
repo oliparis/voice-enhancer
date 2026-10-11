@@ -119,8 +119,8 @@ jobs:
       - name: Run localization checks
         run: ./scripts/test-localization.sh
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install CMake and XcodeGen
+        run: brew install cmake xcodegen
 
       - name: Generate Xcode project
         working-directory: VoiceEnhancerApp
@@ -129,8 +129,9 @@ jobs:
       - name: Build linked app without signing
         # Use the runner architecture to match the engine built above. The
         # project's arm64 default is for local Apple Silicon app builds.
+        # Strip Homebrew from PATH to test CMake discovery in GUI-launched Xcode.
         run: |
-          xcodebuild \
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/xcodebuild \
             -project VoiceEnhancerApp/VoiceEnhancer.xcodeproj \
             -scheme VoiceEnhancer \
             -configuration Release \
